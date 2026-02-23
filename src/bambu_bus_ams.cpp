@@ -182,7 +182,8 @@ uint8_t get_filament_left_char(_ams *ams)
     return data;
 }
 
-static uint32_t time_last_fil_ticks[4] = {};
+static uint32_t time_last_fil_ticks[4]      = {};
+static uint32_t time_sendout_onuse_ticks[4] = {};
 bool set_motion(unsigned char read_num, unsigned char statu_flags, unsigned char fliment_motion_flag, uint8_t ams_num)
 {
     uint32_t time_used = 0;
@@ -195,7 +196,7 @@ bool set_motion(unsigned char read_num, unsigned char statu_flags, unsigned char
         const uint32_t dt_ticks = (tl == 0) ? 0u : (uint32_t)(now - tl);
         tl = now;
 
-        time_used = (time_hw_tpms ? (dt_ticks / time_hw_tpms) : 0u); // ms
+        time_used = (time_hw_tpms ? (dt_ticks / time_hw_tpms) : 0u);
         if (time_used > 1000u) time_used = 0u;
     }
 
@@ -212,6 +213,8 @@ bool set_motion(unsigned char read_num, unsigned char statu_flags, unsigned char
             const bool is_stop_on_use   = ((statu_flags == 0x07) && (fliment_motion_flag == 0x00));
             const bool is_on_use        = ((statu_flags == 0x07) && (fliment_motion_flag == 0x7F));
             const bool is_before_pullb  = ((statu_flags == 0x09) && (fliment_motion_flag == 0x3F));
+
+            uint32_t &t_sendout_onuse = time_sendout_onuse_ticks[ch];
 
             uint8_t loaded = 0xFFu;
             bool allow_any = true;
@@ -241,6 +244,8 @@ bool set_motion(unsigned char read_num, unsigned char statu_flags, unsigned char
                         ams_ptr->filament[prev].motion = _filament_motion::idle;
                         ams_ptr->filament_use_flag = 0x00;
                         ams_ptr->pressure = 0xFFFF;
+
+                        time_sendout_onuse_ticks[prev] = 0u;
                     }
                     bus_now_ams_num = bambubus_ams_map[ams_num];
                     ams_ptr->now_filament_num = ch;
@@ -249,6 +254,8 @@ bool set_motion(unsigned char read_num, unsigned char statu_flags, unsigned char
 
             if (is_send_out)
             {
+                t_sendout_onuse = 0u;
+
                 if (ams_num == (uint8_t)BAMBU_BUS_AMS_NUM)
                 {
                     const _filament_motion prev = ams_ptr->filament[ch].motion;
@@ -263,6 +270,8 @@ bool set_motion(unsigned char read_num, unsigned char statu_flags, unsigned char
             }
             else if (is_before_on_use)
             {
+                t_sendout_onuse = 0u;
+
                 if (!allow_any) return true;
 
                 const _filament_motion prev = ams_ptr->filament[ch].motion;
@@ -276,6 +285,8 @@ bool set_motion(unsigned char read_num, unsigned char statu_flags, unsigned char
             }
             else if (is_stop_on_use)
             {
+                t_sendout_onuse = 0u;
+
                 if (!allow_stop) return true;
 
                 const _filament_motion prev = ams_ptr->filament[ch].motion;
@@ -293,6 +304,37 @@ bool set_motion(unsigned char read_num, unsigned char statu_flags, unsigned char
             {
                 if (!allow_any) return true;
 
+                const _filament_motion prev = ams_ptr->filament[ch].motion;
+
+                if (prev == _filament_motion::send_out)
+                {
+                    if (time_hw_tpms != 0u)
+                    {
+                        const uint32_t now = time_ticks32();
+                        if (t_sendout_onuse == 0u) t_sendout_onuse = now;
+
+                        const uint32_t dt  = (uint32_t)(now - t_sendout_onuse);
+                        const uint32_t lim = 5000u * (uint32_t)time_hw_tpms;
+
+                        if (dt < lim)
+                        {
+                            ams_ptr->filament_use_flag = 0x04;
+                            ams_ptr->pressure          = 0x4700;
+                            return true;
+                        }
+
+                        t_sendout_onuse = 0u;
+                    }
+                    else
+                    {
+                        ams_ptr->filament_use_flag = 0x04;
+                        ams_ptr->pressure          = 0x4700;
+                        return true;
+                    }
+                }
+
+                t_sendout_onuse = 0u;
+
                 ams_ptr->filament[ch].motion = _filament_motion::on_use;
                 ams_ptr->filament_use_flag   = 0x04;
                 ams_ptr->pressure            = 0x2B00;
@@ -302,6 +344,8 @@ bool set_motion(unsigned char read_num, unsigned char statu_flags, unsigned char
             }
             else if (is_before_pullb)
             {
+                t_sendout_onuse = 0u;
+
                 if (!allow_stop) return true;
 
                 const _filament_motion prev = ams_ptr->filament[ch].motion;
@@ -321,6 +365,8 @@ bool set_motion(unsigned char read_num, unsigned char statu_flags, unsigned char
             }
             else if (statu_flags == 0x09)
             {
+                t_sendout_onuse = 0u;
+
                 ams_ptr->filament_use_flag = 0x04;
                 ams_ptr->pressure          = 0x2B00;
             }
@@ -333,6 +379,8 @@ bool set_motion(unsigned char read_num, unsigned char statu_flags, unsigned char
                 {
                     const uint8_t ch = ams_ptr->now_filament_num;
                     const _filament_motion m = ams_ptr->filament[ch].motion;
+
+                    time_sendout_onuse_ticks[ch] = 0u;
 
                     if (m == _filament_motion::before_pull_back ||
                         m == _filament_motion::on_use ||
@@ -374,7 +422,10 @@ bool set_motion(unsigned char read_num, unsigned char statu_flags, unsigned char
                 }
 
                 for (uint8_t i = 0; i < 4; i++)
+                {
                     ams_ptr->filament[i].motion = _filament_motion::idle;
+                    time_sendout_onuse_ticks[i] = 0u;
+                }
 
                 ams_ptr->filament_use_flag = 0x00;
                 ams_ptr->pressure          = 0xFFFF;
@@ -947,7 +998,7 @@ unsigned char long_packge_version_version_and_name_AMS_lite[] = {0x00, 0x00, 0x0
 //0x46 // 70
 //0x50 // 80
 //0x5A // 90
-unsigned char long_packge_version_version_and_name_AMS08[] = {0x00, 0x00, 0x00, 0x46 , // verison number
+unsigned char long_packge_version_version_and_name_AMS08[] = {0x00, 0x00, 0x00, 0x5A , // verison number
                                                               0x41, 0x4D, 0x53, 0x30, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
 

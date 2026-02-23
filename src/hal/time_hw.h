@@ -68,21 +68,6 @@ uint64_t time_ticks64(void);
 uint64_t time_us64(void);
 uint64_t time_ms64(void);
 
-static inline __attribute__((always_inline)) uint32_t micros(void)
-{
-    return (uint32_t)time_us64();
-}
-
-static inline __attribute__((always_inline)) uint32_t millis(void)
-{
-    return (uint32_t)time_ms64();
-}
-
-static inline __attribute__((always_inline)) uint64_t get_time64(void)
-{
-    return time_ms64();
-}
-
 static inline __attribute__((always_inline)) void delayTicks32(uint32_t ticks)
 {
     if (!ticks) return;

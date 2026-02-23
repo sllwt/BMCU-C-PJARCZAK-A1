@@ -1,6 +1,6 @@
 # BMCU Firmware – Calibration and Compatibility Notes
 
-This BMCU firmware has been tested and verified with the latest Bambu Lab A1 firmware v1.07.02.
+This BMCU firmware has been tested and verified with the latest Bambu Lab A1 firmware.
 
 IMPORTANT:
 The printer must be configured as AMS, not AMS Lite.
@@ -32,6 +32,7 @@ https://github.com/jarczakpawel/BambuStudio-BMCU
 - Bambu Lab A1
 - Bambu Lab A1 mini
 - Bambu Lab P1S
+- Bambu Lab X1C
 
 Other printers may also work, but they have not been tested.
 
@@ -210,17 +211,6 @@ I am not responsible for any damage, failed prints, hardware issues, or data los
 
 ---
 
-## Unsupported requests
-
-Please do not ask:
-
-- how to flash BMCU
-- how to configure or use multi-BMCU setups
-
-These topics are well documented online and will not be answered.
-
----
-
 ## Before opening a bug report
 
 Please verify the basics first:
@@ -245,15 +235,18 @@ This firmware has undergone solid testing, and no issues are expected.
 
 ---
 
-## Tested configuration
-
-- Printer: Bambu Lab A1 / A1 mini
-- Printer firmware: v1.07.02
-- Printer mode: AMS (not AMS Lite)
-
----
-
 # Changelog
+
+## V9
+
+### User-visible changes
+- Increased filament loading force for improved reliability during filament insertion.
+- Improved filament loading behavior on some materials (e.g. **Sunlu PLA+** and similar filaments) where loading characteristics differ from standard PLA/PETG.
+- Added protection against **spool jams**:
+    - Lock mode activates if the buffer drops too low during printing.
+    - Lock mode also activates if the motor runs at high speed continuously for ~8 seconds.
+    - The lock is automatically released once the buffer returns to the neutral position.
+    - Prevents prolonged motor overrun when filament movement is blocked.
 
 ## V8
 

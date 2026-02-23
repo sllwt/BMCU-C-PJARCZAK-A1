@@ -14,6 +14,67 @@ static inline float clampf(float x, float a, float b)
     if (x > b) return b;
     return x;
 }
+
+static uint64_t g_time_last_ticks64 = 0ull;
+static uint32_t g_time_rem_ticks32  = 0u;
+static uint64_t g_time_ms64         = 0ull;
+static uint32_t g_time_tpm_last     = 0u;
+static uint8_t  g_time_inited       = 0u;
+
+static inline __attribute__((always_inline)) uint64_t time_ms_fast(void)
+{
+    uint32_t tpm = time_hw_tpms;
+    if (!tpm) tpm = 1u;
+
+    const uint64_t now_ticks = time_ticks64();
+
+    if (!g_time_inited || (tpm != g_time_tpm_last))
+    {
+        g_time_inited = 1u;
+        g_time_tpm_last = tpm;
+        g_time_last_ticks64 = now_ticks;
+
+        g_time_ms64 = now_ticks / (uint64_t)tpm;
+        g_time_rem_ticks32 = (uint32_t)(now_ticks - g_time_ms64 * (uint64_t)tpm);
+        return g_time_ms64;
+    }
+
+    const uint64_t dt64 = now_ticks - g_time_last_ticks64;
+    g_time_last_ticks64 = now_ticks;
+
+    if (__builtin_expect(dt64 > 0xFFFFFFFFull, 0))
+    {
+        g_time_ms64 = now_ticks / (uint64_t)tpm;
+        g_time_rem_ticks32 = (uint32_t)(now_ticks - g_time_ms64 * (uint64_t)tpm);
+        return g_time_ms64;
+    }
+
+    const uint32_t dt  = (uint32_t)dt64;
+    const uint32_t rem = g_time_rem_ticks32;
+
+    if (__builtin_expect(dt > (0xFFFFFFFFu - rem), 0))
+    {
+        g_time_ms64 = now_ticks / (uint64_t)tpm;
+        g_time_rem_ticks32 = (uint32_t)(now_ticks - g_time_ms64 * (uint64_t)tpm);
+        return g_time_ms64;
+    }
+
+    const uint32_t acc = dt + rem;
+
+    if (tpm <= 1u)
+    {
+        g_time_ms64 += (uint64_t)acc;
+        g_time_rem_ticks32 = 0u;
+        return g_time_ms64;
+    }
+
+    const uint32_t inc = acc / tpm;
+    g_time_rem_ticks32 = acc - inc * tpm;
+
+    g_time_ms64 += (uint64_t)inc;
+    return g_time_ms64;
+}
+
 static inline float retract_mag_from_err(float err, float mag_max)
 {
     constexpr float e0 = 0.10f;
@@ -85,13 +146,15 @@ float MC_PULL_V_OFFSET[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 float MC_PULL_V_MIN[4]    = {1.00f, 1.00f, 1.00f, 1.00f};
 float MC_PULL_V_MAX[4]    = {2.00f, 2.00f, 2.00f, 2.00f};
 
-uint8_t MC_PULL_pct[4]    = {50, 50, 50, 50};
+uint8_t MC_PULL_pct[4]        = {50, 50, 50, 50};
 static float MC_PULL_pct_f[4] = {50.0f, 50.0f, 50.0f, 50.0f};
 
 static float  MC_PULL_stu_raw[4]        = {1.65f, 1.65f, 1.65f, 1.65f};
 static int8_t MC_PULL_stu[4]            = {0, 0, 0, 0};
 
-static uint8_t MC_ONLINE_key_stu[4]     = {0, 0, 0, 0};
+static uint8_t  MC_ONLINE_key_stu[4]    = {0, 0, 0, 0};
+static uint8_t  g_on_use_low_latch[4]   = {0, 0, 0, 0};
+static uint16_t g_on_use_hi_pwm_ms[4]   = {0, 0, 0, 0};
 
 #if BMCU_DM_TWO_MICROSWITCH
 static inline uint8_t dm_key_to_state(float v)
@@ -149,28 +212,28 @@ static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
 // ================ LOAD CONTROL ======================
 #if BMCU_P1S  // P1S
     // Stage1
+    static constexpr int   MC_LOAD_S1_FAST_PCT       = 88;
+    static constexpr int   MC_LOAD_S1_HARD_STOP_PCT  = 97;  // bezpiecznik
+    static constexpr int   MC_LOAD_S1_HARD_HYS       = 2;   // wróć dopiero < (HARD_STOP - HYS)
+    // Stage2 (hold_load)
+    static constexpr float MC_LOAD_S2_HOLD_TARGET_PCT    = 97.0f;
+    static constexpr float MC_LOAD_S2_HOLD_BAND_LO_DELTA = 1.0f;   // push_hi = hold_target - delta
+    static constexpr float MC_LOAD_S2_PUSH_START_PCT     = 88.0f;  // start push PWM
+    static constexpr float MC_LOAD_S2_PWM_HI             = 550.0f;
+    static constexpr float MC_LOAD_S2_PWM_LO             = 1000.0f;
+    // ===== ON_USE CONTROL =====
+    static constexpr float MC_ON_USE_TARGET_PCT    = 54.0f;
+    static constexpr float MC_ON_USE_BAND_LO_DELTA = 0.2f;  // band_lo = target - delta
+    static constexpr float MC_ON_USE_BAND_HI_PCT   = 65.0f;
+#else        // A1
+    // Stage1
     static constexpr int   MC_LOAD_S1_FAST_PCT       = 85;
     static constexpr int   MC_LOAD_S1_HARD_STOP_PCT  = 95;  // bezpiecznik
     static constexpr int   MC_LOAD_S1_HARD_HYS       = 2;   // wróć dopiero < (HARD_STOP - HYS)
     // Stage2 (hold_load)
     static constexpr float MC_LOAD_S2_HOLD_TARGET_PCT    = 90.0f;
-    static constexpr float MC_LOAD_S2_HOLD_BAND_LO_DELTA = 1.0f;   // push_hi = hold_target - delta
-    static constexpr float MC_LOAD_S2_PUSH_START_PCT     = 80.0f;  // start push PWM
-    static constexpr float MC_LOAD_S2_PWM_HI             = 600.0f;
-    static constexpr float MC_LOAD_S2_PWM_LO             = 1000.0f;
-    // ===== ON_USE CONTROL =====
-    static constexpr float MC_ON_USE_TARGET_PCT    = 54.0f;
-    static constexpr float MC_ON_USE_BAND_LO_DELTA = 0.3f;  // band_lo = target - delta
-    static constexpr float MC_ON_USE_BAND_HI_PCT   = 65.0f;
-#else        // A1
-    // Stage1
-    static constexpr int   MC_LOAD_S1_FAST_PCT       = 70;
-    static constexpr int   MC_LOAD_S1_HARD_STOP_PCT  = 80;  // bezpiecznik
-    static constexpr int   MC_LOAD_S1_HARD_HYS       = 2;   // wróć dopiero < (HARD_STOP - HYS)
-    // Stage2 (hold_load)
-    static constexpr float MC_LOAD_S2_HOLD_TARGET_PCT    = 75.0f;
     static constexpr float MC_LOAD_S2_HOLD_BAND_LO_DELTA = 0.3f;   // push_hi = hold_target - delta
-    static constexpr float MC_LOAD_S2_PUSH_START_PCT     = 65.0f;  // start push PWM
+    static constexpr float MC_LOAD_S2_PUSH_START_PCT     = 80.0f;  // start push PWM
     static constexpr float MC_LOAD_S2_PWM_HI             = 480.0f;
     static constexpr float MC_LOAD_S2_PWM_LO             = 1000.0f;
     // ===== ON_USE CONTROL =====
@@ -328,70 +391,71 @@ static inline void MC_PULL_ONLINE_read()
     const float keyv[4] = { key0, key1, key2, key3 };
 
     // --- Buffer Gesture Load  ---
-    static uint32_t gst_t0[4]     = {0,0,0,0};
-    static uint8_t  gst_step[4]   = {0,0,0,0};      // 0=idle, 1=wait_low, 2=wait_return
-    static bool     gst_active[4] = {false,false,false,false};
-    static uint32_t gst_act_t0[4] = {0,0,0,0};
+    static uint32_t gst_t0_ticks[4]     = {0,0,0,0};
+    static uint8_t  gst_step[4]         = {0,0,0,0};      // 0=idle, 1=wait_low, 2=wait_return
+    static bool     gst_active[4]       = {false,false,false,false};
+    static uint32_t gst_act_t0_ticks[4] = {0,0,0,0};
 
-    const uint32_t now_ms = time_ticks32() / time_hw_ticks_per_ms();
+    const uint32_t now_ticks = time_ticks32();
+    const uint32_t tpm = time_hw_tpms;
+
+    const uint32_t T100  = 100u  * tpm;
+    const uint32_t T2000 = 2000u * tpm;
+    const uint32_t T5500 = 5500u * tpm;
 
     for (uint8_t i = 0; i < kChCount; i++)
     {
-        // Kanał nie wpięty - reset FSM, zero stanu
         if (!filament_channel_inserted[i])
         {
             gst_step[i] = 0;
             gst_active[i] = false;
-            gst_t0[i] = 0;
-            gst_act_t0[i] = 0;
+            gst_t0_ticks[i] = 0;
+            gst_act_t0_ticks[i] = 0;
             MC_ONLINE_key_stu[i] = 0u;
             continue;
         }
 
-        // Jak DM fail-latch jest aktywny - NIE trzymaj wirtualnego switcha, bo latch kasuje się dopiero przy ks==0 (<0.6V)
         if (dm_fail_latch[i])
         {
             gst_step[i] = 0;
             gst_active[i] = false;
         }
 
-        // skip jak aktywne pobieranie
         if (!gst_active[i])
         {
             const float pct_f = pull_v_to_percent_f(i, MC_PULL_stu_raw[i]);
 
             if (gst_step[i] == 0)
             {
-                if (pct_f < 10.0f) { gst_step[i] = 1; gst_t0[i] = now_ms; }
+                if (pct_f < 10.0f) { gst_step[i] = 1; gst_t0_ticks[i] = now_ticks; }
             }
             else if (gst_step[i] == 1)
             {
                 if (pct_f > 15.0f) { gst_step[i] = 0; }
-                else if ((uint32_t)(now_ms - gst_t0[i]) >= 100u)
+                else if ((uint32_t)(now_ticks - gst_t0_ticks[i]) >= T100)
                 {
                     gst_step[i] = 2;
                 }
             }
-            else // gst_step == 2
+            else
             {
-                if ((uint32_t)(now_ms - gst_t0[i]) > 2000u)
+                if ((uint32_t)(now_ticks - gst_t0_ticks[i]) > T2000)
                 {
                     gst_step[i] = 0;
                 }
                 else if (pct_f >= 45.0f && pct_f <= 55.0f)
                 {
                     gst_active[i] = true;
-                    gst_act_t0[i] = now_ms;
+                    gst_act_t0_ticks[i] = now_ticks;
                     gst_step[i] = 0;
                 }
             }
         }
 
-        // Obsługa aktywności
         if (gst_active[i])
         {
             if (keyv[i] > 1.7f) gst_active[i] = false;
-            else if ((uint32_t)(now_ms - gst_act_t0[i]) > 5500u) gst_active[i] = false;
+            else if ((uint32_t)(now_ticks - gst_act_t0_ticks[i]) > T5500) gst_active[i] = false;
         }
 
         const uint8_t phys = dm_key_to_state(keyv[i]);
@@ -602,7 +666,7 @@ public:
 
     void set_motion(filament_motion_enum _motion, uint64_t over_time)
     {
-        set_motion(_motion, over_time, get_time64());
+        set_motion(_motion, over_time, time_ms_fast());
     }
 
     void set_motion(filament_motion_enum _motion, uint64_t over_time, uint64_t time_now)
@@ -843,6 +907,17 @@ public:
             pwm_zeroed = 1;
             x_prev[CHx] = 0.0f;
             motion = filament_motion_enum::filament_motion_stop;
+            Motion_control_set_PWM(CHx, 0);
+            return;
+        }
+
+        if (motion == filament_motion_enum::filament_motion_pressure_ctrl_on_use && g_on_use_low_latch[CHx])
+        {
+            g_on_use_hi_pwm_ms[CHx] = 0u;
+            PID_speed.clear();
+            PID_pressure.clear();
+            pwm_zeroed = 1;
+            x_prev[CHx] = 0.0f;
             Motion_control_set_PWM(CHx, 0);
             return;
         }
@@ -1768,7 +1843,50 @@ public:
             if (x > hi) x = hi;
         }
 
-        const int pwm_out = (int)x;
+        const int pwm_out0 = (int)x;
+
+        if ((bus_host_device_type == host_device_type_ams) &&
+            (motion == filament_motion_enum::filament_motion_pressure_ctrl_on_use) &&
+            !g_on_use_low_latch[CHx])
+        {
+            const int ax = (pwm_out0 < 0) ? -pwm_out0 : pwm_out0;
+
+            if (ax > 800)
+            {
+                uint16_t add = (uint16_t)(time_E * 1000.0f + 0.5f);
+                uint32_t t = (uint32_t)g_on_use_hi_pwm_ms[CHx] + (uint32_t)add;
+
+                if (t >= 8000u)
+                {
+                    g_on_use_hi_pwm_ms[CHx] = 0u;
+                    g_on_use_low_latch[CHx] = 1u;
+
+                    auto &A = ams[motion_control_ams_num];
+                    if (A.now_filament_num == (uint8_t)CHx) A.pressure = 0x0001u;
+
+                    PID_speed.clear();
+                    PID_pressure.clear();
+                    pwm_zeroed = 1;
+                    x_prev[CHx] = 0.0f;
+                    Motion_control_set_PWM(CHx, 0);
+                    return;
+                }
+                else
+                {
+                    g_on_use_hi_pwm_ms[CHx] = (uint16_t)t;
+                }
+            }
+            else
+            {
+                g_on_use_hi_pwm_ms[CHx] = 0u;
+            }
+        }
+        else
+        {
+            g_on_use_hi_pwm_ms[CHx] = 0u;
+        }
+
+        const int pwm_out = pwm_out0;
         pwm_zeroed = (pwm_out == 0);
         x_prev[CHx] = x;
         Motion_control_set_PWM(CHx, pwm_out);
@@ -2117,7 +2235,10 @@ static void motor_motion_switch(uint64_t time_now)
             {
                 filament_now_position[num] = filament_using;
                 MOTOR_CONTROL[num].set_motion(filament_motion_enum::filament_motion_pressure_ctrl_on_use, 300, time_now);
-                MC_STU_RGB_set(num, 0x00, 0xB0, 0xFF);
+
+                if (g_on_use_low_latch[num]) MC_STU_RGB_set(num, 0xFF, 0x00, 0x00);
+                else                         MC_STU_RGB_set(num, 0x00, 0xB0, 0xFF);
+
                 break;
             }
 
@@ -2183,7 +2304,7 @@ static inline void stu_apply_baseline(int error)
 
 static void motor_motion_run(int error)
 {
-    const uint64_t time_now = get_time64();
+    const uint64_t time_now = time_ms_fast();
 
     #if BMCU_DM_TWO_MICROSWITCH
         for (uint8_t ch = 0; ch < kChCount; ch++)
@@ -2298,15 +2419,36 @@ static void motor_motion_run(int error)
         uint8_t r = 0u, g = 0u, b = 0u;
         bool is_filament_rgb = false;
 
-        const int8_t stu = MC_PULL_stu[i];
-        if (stu > 0)
+        const uint8_t pct = MC_PULL_pct[i];
+
+        int hi_thr = MC_PULL_DEADBAND_PCT_HIGH;
+
+        const filament_motion_enum m = MOTOR_CONTROL[i].motion;
+
+        bool hi_hold =
+            (m == filament_motion_enum::filament_motion_send) ||
+            (m == filament_motion_enum::filament_motion_before_on_use) ||
+            (m == filament_motion_enum::filament_motion_stop_on_use);
+
+        if (!hi_hold && (m == filament_motion_enum::filament_motion_pressure_ctrl_on_use))
         {
-            // high pressure
+            const uint64_t t0 = MOTOR_CONTROL[i].on_use_hi_gate_t0_ms;
+            if (t0 != 0ull && (time_now - t0) < 5000ull) hi_hold = true;
+        }
+
+        if (hi_hold)
+        {
+            hi_thr = (int)MC_LOAD_S2_HOLD_TARGET_PCT + 3;
+            if (hi_thr > 100) hi_thr = 100;
+            if (hi_thr < 0) hi_thr = 0;
+        }
+
+        if ((int)pct >= hi_thr)
+        {
             r = 0x10u;
         }
-        else if (stu < 0)
+        else if (pct <= 30u)
         {
-            // low pressure
             b = 0x10u;
         }
         else
@@ -2331,7 +2473,6 @@ static void motor_motion_run(int error)
             {
                 if (key == 0u)
                 {
-                    const uint8_t pct = MC_PULL_pct[i];
                     if ((uint8_t)(pct - 49u) <= 2u) { r = 0x10u; g = 0x08u; }
                 }
             }
@@ -2344,6 +2485,43 @@ static void motor_motion_run(int error)
 void Motion_control_run(int error)
 {
     MC_PULL_ONLINE_read();
+
+    auto &A = ams[motion_control_ams_num];
+
+    for (uint8_t ch = 0; ch < kChCount; ch++)
+    {
+        if (A.filament[ch].motion != _filament_motion::on_use)
+        {
+            g_on_use_low_latch[ch] = 0u;
+            g_on_use_hi_pwm_ms[ch] = 0u;
+        }
+    }
+
+    const uint8_t n = A.now_filament_num;
+
+    if (!error &&
+        (bus_host_device_type == host_device_type_ams) &&
+        (n < kChCount) &&
+        filament_channel_inserted[n] &&
+        (A.filament[n].motion == _filament_motion::on_use))
+    {
+        const uint8_t pct = MC_PULL_pct[n];
+
+        if (!g_on_use_low_latch[n])
+        {
+            if (pct <= 30u) g_on_use_low_latch[n] = 1u;
+        }
+        else
+        {
+            if (pct >= 50u) g_on_use_low_latch[n] = 0u;
+        }
+
+        if (g_on_use_low_latch[n])
+        {
+            A.pressure = 0x0001u;
+            g_on_use_hi_pwm_ms[n] = 0u;
+        }
+    }
 
     // long-press reset kalibracji (tylko gdy brak filamentu na wszystkich kanałach)
     if ((error <= 0) && all_no_filament())
@@ -2365,7 +2543,7 @@ void Motion_control_run(int error)
             if (hard_blue) { pressed = (int)ch; break; }
         }
 
-        const uint32_t tpm = time_hw_ticks_per_ms();
+        const uint32_t tpm   = time_hw_tpms;
         const uint32_t now_t = time_ticks32();
 
         if (pressed >= 0)
@@ -2391,8 +2569,6 @@ void Motion_control_run(int error)
     }
 
     AS5600_distance_updata();
-
-    auto &A = ams[motion_control_ams_num];
 
     for (uint8_t i = 0; i < kChCount; i++)
     {
