@@ -1029,7 +1029,7 @@ void get_package_long_packge_version(unsigned char *buf, int length)
     bambubus_long_packge_data data;
     const uint8_t ams_num = printer_data_long.datas[0];
 
-    if ((ams_num >= 4) || (ams[bambubus_ams_map[ams_num]].online != true))
+    if ((ams_num >= 4u) || (!ams[bambubus_ams_map[ams_num]].online))
         return;
 
     unsigned char *payload = nullptr;
@@ -1049,9 +1049,6 @@ void get_package_long_packge_version(unsigned char *buf, int length)
     {
         return;
     }
-
-    payload = long_packge_version_version_and_name_AMS08;
-    payload_len = (uint16_t)sizeof(long_packge_version_version_and_name_AMS08);
 
     payload[payload_len - 1] = ams_num;
 

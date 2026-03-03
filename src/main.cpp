@@ -229,43 +229,45 @@ int main(void)
     DEBUG("START\n");
 
     while (1)
-    {
-        const ahubus_package_type   ahub_stu     = ahubus_run();
-        const bambubus_package_type bambubus_stu = bambubus_run();
-        bus_port_to_host.send_package();
-
-        static int error = 0;
-
-        if ((ahub_stu != ahubus_package_type::none) || (bambubus_stu != bambubus_package_type::none))
         {
-            if ((ahub_stu != ahubus_package_type::error) || (bambubus_stu != bambubus_package_type::error))
+            const ahubus_package_type   ahub_stu     = ahubus_run();
+            const bambubus_package_type bambubus_stu = bambubus_run();
+            bus_port_to_host.send_package();
+
+            static int error = 0;
+            const uint16_t device_type = bambubus_ams_address;
+
+            if ((ahub_stu != ahubus_package_type::none) || (bambubus_stu != bambubus_package_type::none))
             {
-                error = 0;
-
-                if (bambubus_stu == bambubus_package_type::heartbeat)
+                if ((ahub_stu != ahubus_package_type::error) || (bambubus_stu != bambubus_package_type::error))
                 {
-                    SYS_RGB.set_RGB(0x38, 0x35, 0x32, 0);
-                    bus_host_device_type = host_device_type_ams;
-                }
+                    error = 0;
 
-                if (ahub_stu == ahubus_package_type::heartbeat)
+                    if (bambubus_stu == bambubus_package_type::heartbeat)
+                    {
+                        SYS_RGB.set_RGB(0x38, 0x35, 0x32, 0);
+                        if (device_type == host_device_type_ams_lite) bus_host_device_type = host_device_type_ams_lite;
+                        else if (device_type == host_device_type_ams)  bus_host_device_type = host_device_type_ams;
+                    }
+
+                    if (ahub_stu == ahubus_package_type::heartbeat)
+                    {
+                        SYS_RGB.set_RGB(0x00, 0x10, 0x00, 0);
+                        bus_host_device_type = host_device_type_ahub;
+                    }
+
+                    ams_datas_save_run();
+                    ams_state_save_run();
+                }
+                else
                 {
-                    SYS_RGB.set_RGB(0x00, 0x10, 0x00, 0);
-                    bus_host_device_type = host_device_type_ahub;
+                    error = -1;
+                    SYS_RGB.set_RGB(0x10, 0x00, 0x00, 0);
                 }
+            }
 
-                ams_datas_save_run();
-                ams_state_save_run();
-            }
-            else
-            {
-                error = -1;
-                SYS_RGB.set_RGB(0x10, 0x00, 0x00, 0);
-            }
+            ADC_DMA_poll();
+            Motion_control_run(error);
+            RGB_update();
         }
-
-        ADC_DMA_poll();
-        Motion_control_run(error);
-        RGB_update();
-    }
 }
