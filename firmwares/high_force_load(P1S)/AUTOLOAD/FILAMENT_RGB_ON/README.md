@@ -1,3 +1,9 @@
+ ____  __  __   ____  _   _
+| __ )|  \/  | / ___|| | | |
+|  _ \| |\/| || |    | | | |
+| |_) | |  | || |___ | |_| |
+|____/|_|  |_| \____| \___/
+
 ## Which firmware folder should I choose here?
 
 **Choose between:** SOLO, AMS_A, AMS_B, AMS_C, AMS_D.

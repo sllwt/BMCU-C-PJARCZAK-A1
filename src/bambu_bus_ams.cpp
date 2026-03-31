@@ -83,21 +83,44 @@ void bambubus_long_package_analysis(uint8_t *buf, int data_length, bambubus_long
 }
 
 bambubus_long_packge_data printer_data_long;
-// 用于分辨bambubus数据包是否应该处理，类型是什么
+
+static bool p2s_mode = false;
+
+enum class p2s_runtime_state : uint8_t
+{
+    boot = 0,
+    runtime = 1,
+    printing = 2
+};
+
+static p2s_runtime_state p2s_state = p2s_runtime_state::boot;
+static uint8_t p2s_a0_seq_pos   = 0;
+static uint8_t p2s_0237_seq_pos = 0;
+static uint8_t p2s_023c_seq_pos = 0;
+
+static inline void p2s_reset_startup_seq(void)
+{
+    p2s_a0_seq_pos   = 0;
+    p2s_0237_seq_pos = 0;
+    p2s_023c_seq_pos = 0;
+    p2s_state = p2s_runtime_state::boot;
+}
+
+
 bambubus_package_type get_packge_type(unsigned char *buf, int length)
 {
     if (length < 6) return bambubus_package_type::none;
+    if (buf[0] != 0x3D) return bambubus_package_type::none;
+    if (!package_check_crc16(buf, length)) return bambubus_package_type::none;
 
-    if (buf[0] != 0x3D)
-    {
-        return bambubus_package_type::none;
-    }
-    if (package_check_crc16(buf, length) == false)
-    {
-        return bambubus_package_type::none;
-    }
     if (buf[1] == 0xC5)
     {
+        if (buf[4] == 0xA0)
+        {
+            p2s_mode = true;
+            bambubus_ams_address = host_device_type_ams;
+            return bambubus_package_type::p2s_short_a0;
+        }
 
         switch (buf[4])
         {
@@ -119,7 +142,7 @@ bambubus_package_type get_packge_type(unsigned char *buf, int length)
             return bambubus_package_type::ETC;
         }
     }
-    else if (buf[1] == 0x05)
+    else if ((buf[1] == 0x05) || (buf[1] == 0x04))
     {
         if (length < 15) return bambubus_package_type::none;
         bambubus_long_package_analysis(buf, length, &printer_data_long);
@@ -140,6 +163,10 @@ bambubus_package_type get_packge_type(unsigned char *buf, int length)
             return bambubus_package_type::set_filament_info_type2;
         case 0x103:
             return bambubus_package_type::version;
+        case 0x237:
+            return p2s_mode ? bambubus_package_type::p2s_long_0237 : bambubus_package_type::ETC;
+        case 0x23C:
+            return p2s_mode ? bambubus_package_type::p2s_long_023c : bambubus_package_type::ETC;
         case 0x402:
             return bambubus_package_type::serial_number;
         default:
@@ -179,7 +206,7 @@ static uint32_t time_sendout_onuse_ticks[4] = {};
              const uint8_t ch = (uint8_t)read_num;
 
              const bool is_send_out      = ((statu_flags == 0x03) && (fliment_motion_flag == 0x00));
-             const bool is_before_on_use = ((statu_flags == 0x09) && (fliment_motion_flag == 0xA5));
+             const bool is_before_on_use = ((statu_flags == 0x09) && ((fliment_motion_flag == 0x7F) || (fliment_motion_flag == 0xA5)));
              const bool is_stop_on_use   = ((statu_flags == 0x07) && (fliment_motion_flag == 0x00));
              const bool is_on_use        = ((statu_flags == 0x07) && (fliment_motion_flag == 0x7F));
              const bool is_before_pullb  = ((statu_flags == 0x09) && (fliment_motion_flag == 0x3F));
@@ -237,6 +264,7 @@ static uint32_t time_sendout_onuse_ticks[4] = {};
                  ams_ptr->filament[ch].motion = _filament_motion::send_out;
                  ams_ptr->filament_use_flag = 0x02;
                  ams_ptr->pressure = 0x4700;
+                 p2s_state = p2s_runtime_state::runtime;
              }
              else if (is_before_on_use)
              {
@@ -248,7 +276,13 @@ static uint32_t time_sendout_onuse_ticks[4] = {};
 
                  ams_ptr->filament[ch].motion = _filament_motion::before_on_use;
                  ams_ptr->filament_use_flag   = 0x04;
-                 ams_ptr->pressure = (prev == _filament_motion::send_out) ? 0x4700 : 0x2B00;
+
+                 if (fliment_motion_flag == 0x7F)
+                     ams_ptr->pressure = 0x1CE8; // v13
+                 else
+                     ams_ptr->pressure = (prev == _filament_motion::send_out) ? 0x4700 : 0x2B00;
+
+                 p2s_state = p2s_runtime_state::runtime;
 
                  if (ams_num == (uint8_t)BAMBU_BUS_AMS_NUM)
                      ams_state_set_loaded(ch);
@@ -269,6 +303,7 @@ static uint32_t time_sendout_onuse_ticks[4] = {};
 
                  ams_ptr->filament_use_flag   = 0x04;
                  ams_ptr->pressure = (prev == _filament_motion::send_out) ? 0x4700 : 0x2B00;
+                 p2s_state = p2s_runtime_state::runtime;
              }
              else if (is_on_use)
              {
@@ -284,12 +319,13 @@ static uint32_t time_sendout_onuse_ticks[4] = {};
                          if (t_sendout_onuse == 0u) t_sendout_onuse = now;
 
                          const uint32_t dt  = (uint32_t)(now - t_sendout_onuse);
-                         const uint32_t lim = 5000u * (uint32_t)time_hw_tpms;
+                         const uint32_t lim = 15000u * (uint32_t)time_hw_tpms;
 
                          if (dt < lim)
                          {
                              ams_ptr->filament_use_flag = 0x04;
                              ams_ptr->pressure          = 0x4700;
+                             p2s_state = p2s_runtime_state::printing;
                              return true;
                          }
 
@@ -299,6 +335,7 @@ static uint32_t time_sendout_onuse_ticks[4] = {};
                      {
                          ams_ptr->filament_use_flag = 0x04;
                          ams_ptr->pressure          = 0x4700;
+                        p2s_state = p2s_runtime_state::printing;
                          return true;
                      }
                  }
@@ -310,6 +347,7 @@ static uint32_t time_sendout_onuse_ticks[4] = {};
 
                  if (ams_ptr->pressure != 0xF06Fu)
                      ams_ptr->pressure = 0x2B00;
+                 p2s_state = p2s_runtime_state::printing;
 
                  if (ams_num == (uint8_t)BAMBU_BUS_AMS_NUM)
                      ams_state_set_loaded(ch);
@@ -331,6 +369,7 @@ static uint32_t time_sendout_onuse_ticks[4] = {};
 
                  ams_ptr->filament_use_flag = 0x04;
                  ams_ptr->pressure = 0x2B00;
+                 p2s_state = p2s_runtime_state::runtime;
 
                  if (ams_num == (uint8_t)BAMBU_BUS_AMS_NUM)
                      ams_state_set_unloaded(ch);
@@ -341,6 +380,7 @@ static uint32_t time_sendout_onuse_ticks[4] = {};
 
                  ams_ptr->filament_use_flag = 0x04;
                  ams_ptr->pressure = 0x2B00;
+                 p2s_state = p2s_runtime_state::runtime;
              }
          }
          else if (read_num == 0xFF)
@@ -363,6 +403,7 @@ static uint32_t time_sendout_onuse_ticks[4] = {};
                          ams_ptr->filament_use_flag   = 0x02;
                      }
                         ams_ptr->pressure = 0x4700;
+                     p2s_state = p2s_runtime_state::runtime;
 
                      if (ams_num == (uint8_t)BAMBU_BUS_AMS_NUM)
                          ams_state_set_unloaded(ch);
@@ -401,6 +442,8 @@ static uint32_t time_sendout_onuse_ticks[4] = {};
                  ams_ptr->filament_use_flag = 0x00;
                  ams_ptr->pressure          = 0xFFFF;
                  ams_ptr->now_filament_num  = 0xFF;
+                 if (p2s_state != p2s_runtime_state::boot)
+                     p2s_state = p2s_runtime_state::runtime;
 
                  if (ams_num == (uint8_t)BAMBU_BUS_AMS_NUM)
                      ams_state_set_unloaded(0xFFu); // global clear
@@ -506,7 +549,7 @@ void get_package_motion(bambubus_printer_motion_package_struct *package_recv)
     package_send->ams_num = ams_num;
     package_send->filament_use_flag = ams_ptr->filament_use_flag;
     package_send->filament_channel = ch;
-    package_send->filament_channel_2 = ch;
+    package_send->filament_channel_2 = 198u;
 
     float meters = 1.0f;
     if (ch < 4u)
@@ -709,20 +752,105 @@ static inline __attribute__((always_inline)) void bus_wait_idle_5ms(void)
 }
 
 uint8_t online_detect_res[4][29] = {
-    {0x3D, 0xC0, 0x1D, 0xB4, 0x05, 0x01, 0x00,
-     0x0D, 0x0E, 0xA0, 0x35, 0x35, 0x30, 0x30, 0x00, 0x00, 0x30, 0x30, 0x30, 0x30, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
-     0x33, 0xF0},
-    {0x3D, 0xC0, 0x1D, 0xB4, 0x05, 0x01, 0x00,
-     0x0D, 0x0E, 0xA1, 0x30, 0x30, 0x30, 0x30, 0x00, 0x00, 0x30, 0x30, 0x30, 0x30, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
-     0x33, 0xF0},
-    {0x3D, 0xC0, 0x1D, 0xB4, 0x05, 0x01, 0x00,
-     0x0D, 0x0E, 0xA2, 0x30, 0x30, 0x30, 0x30, 0x00, 0x00, 0x30, 0x30, 0x30, 0x30, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
-     0x33, 0xF0},
-    {0x3D, 0xC0, 0x1D, 0xB4, 0x05, 0x01, 0x00,
-     0x0D, 0x0E, 0xA3, 0x30, 0x30, 0x30, 0x30, 0x00, 0x00, 0x30, 0x30, 0x30, 0x30, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
-     0x33, 0xF0}};
+    {
+        0x3D, 0xC0, 0x1D, 0xB4, 0x05, 0x01, 0x00,
+        0x0D, 0x0E, 0xA0, '5', '5', '0', '0', 0x00, 0x00, '0', '0', '0', '0', 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
+        0x33, 0xF0
+    },
+    {
+        0x3D, 0xC0, 0x1D, 0xB4, 0x05, 0x01, 0x00,
+        0x0D, 0x0E, 0xA1, '0', '0', '0', '0', 0x00, 0x00, '0', '0', '0', '0', 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
+        0x33, 0xF0
+    },
+    {
+        0x3D, 0xC0, 0x1D, 0xB4, 0x05, 0x01, 0x00,
+        0x0D, 0x0E, 0xA2, '0', '0', '0', '0', 0x00, 0x00, '0', '0', '0', '0', 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
+        0x33, 0xF0
+    },
+    {
+        0x3D, 0xC0, 0x1D, 0xB4, 0x05, 0x01, 0x00,
+        0x0D, 0x0E, 0xA3, '0', '0', '0', '0', 0x00, 0x00, '0', '0', '0', '0', 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
+        0x33, 0xF0
+    }
+};
 
 bool have_registered[4] = {false, false, false, false};
+
+static const uint8_t p2s_online_detect_id[20] = {
+    0x0B, 0x13, 'g', '0', '6', '0', '3', 0x0B,
+    0x00, 'H', '1', '1', '7',
+    0xFF, 0xFF, 0xFF, 0xFF,
+    0x00, 0x00, 0x00
+};
+
+static const uint8_t p2s_a0_payload_seq[][10] = {
+    {0x86, 0x36, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00},
+    {0x66, 0x98, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00},
+    {0x82, 0x0E, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00},
+    {0x68, 0x06, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00},
+    {0x1B, 0x06, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00},
+    {0xEF, 0x04, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00},
+    {0xBD, 0x03, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00},
+    {0x8F, 0x03, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00},
+    {0xC7, 0x01, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00},
+    {0x1D, 0x01, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00},
+    {0x64, 0x01, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00},
+    {0x01, 0x00, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00},
+    {0x75, 0x00, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x7D, 0x00, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+};
+
+static const uint8_t p2s_0237_resp_boot0[25] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x1A, 0x00, 0x00, 0x00
+};
+static const uint8_t p2s_0237_resp_boot1[25] = {
+    0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0xFA, 0x12, 0x6A, 0x6C, 0x94, 0x0F, 0x15, 0x6E, 0x73, 0x0C, 0x98, 0x0C, 0x90, 0x0C,
+    0x00, 0x1A, 0x00, 0x00, 0x00
+};
+static const uint8_t p2s_0237_resp_boot2[25] = {
+    0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0xFA, 0x12, 0x6A, 0x6C, 0x94, 0x0F, 0x15, 0x6E, 0x73, 0x0C, 0x98, 0x0C, 0x90, 0x0C,
+    0x02, 0x1A, 0x00, 0x00, 0x00
+};
+static const uint8_t p2s_0237_resp_run[25] = {
+    0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0xFA, 0x12, 0x6A, 0x6C, 0x94, 0x0F, 0x15, 0x6E, 0x73, 0x0C, 0x98, 0x0C, 0x90, 0x0C,
+    0x01, 0x1A, 0x00, 0xF1, 0xFB
+};
+
+static const uint8_t p2s_023c_const_prefix[14] = {
+    0x00, 0xE8, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x15, 0x16, 0x16, 0x15
+};
+static const uint8_t p2s_023c_const_zeros9[9] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+static const uint8_t p2s_023c_const_tail[3] = {0x34, 0x00, 0x31};
+
+static void build_023c_response(uint8_t *resp, uint8_t byte14, uint8_t lo1516, bool phase_done, uint8_t hi44, uint8_t lo43)
+{
+    memcpy(resp, p2s_023c_const_prefix, 14);
+    resp[14] = byte14;
+    resp[15] = lo1516;
+    resp[16] = lo1516;
+    memcpy(resp + 17, p2s_023c_const_zeros9, 9);
+    if (phase_done) {
+        resp[26] = 0x1A; resp[27] = 0x00; resp[28] = 0x00; resp[29] = 0x00;
+        resp[30] = 0x1A; resp[31] = 0x00; resp[32] = 0x00; resp[33] = 0x00;
+    } else {
+        resp[26] = 0x00; resp[27] = 0x00; resp[28] = 0x00; resp[29] = 0x00;
+        resp[30] = 0x00; resp[31] = 0x00; resp[32] = 0x00; resp[33] = 0x00;
+    }
+    memcpy(resp + 34, p2s_023c_const_zeros9, 9);
+    resp[43] = lo43;
+    resp[44] = hi44;
+    resp[45] = 0x00; resp[46] = 0x00; resp[47] = 0x00; resp[48] = 0x00;
+    resp[49] = 0x00; resp[50] = 0x00; resp[51] = 0x00;
+    memcpy(resp + 52, p2s_023c_const_tail, 3);
+}
 
 void get_package_online_detect(unsigned char *buf, int length)
 {
@@ -792,6 +920,121 @@ void get_package_online_detect(unsigned char *buf, int length)
         bus_port_to_host.send_data_len = 29;
     }
 }
+static void get_package_p2s_short_a0(unsigned char *buf, int length)
+{
+    (void)buf;
+    (void)length;
+    if (bus_port_to_host.send_data_len != 0) return;
+
+    const size_t max_pos = sizeof(p2s_a0_payload_seq) / sizeof(p2s_a0_payload_seq[0]);
+    const size_t pos = (p2s_a0_seq_pos < (uint8_t)max_pos) ? p2s_a0_seq_pos : (max_pos - 1u);
+    const uint8_t *payload = p2s_a0_payload_seq[pos];
+
+    uint8_t *out = bus_port_to_host.tx_build_buf();
+    out[0] = 0x3D;
+    out[1] = 0xC0;
+    out[2] = 0x13;
+    out[4] = 0xA0;
+    out[5] = 0x03;
+    out[6] = (p2s_a0_seq_pos == 0u) ? 0x00u : 0x02u;
+    memcpy(out + 7, payload, 10);
+    package_add_crc(out, 19);
+    bus_port_to_host.send_data_len = 19;
+
+    if (p2s_a0_seq_pos < 0xFFu) p2s_a0_seq_pos++;
+}
+
+static void get_package_p2s_long_0237(unsigned char *buf, int length)
+{
+    (void)buf;
+    (void)length;
+    if (bus_port_to_host.send_data_len != 0) return;
+
+    const bool is_boot_req = (printer_data_long.data_length >= 3) && (printer_data_long.datas[2] == 0x01);
+    const uint8_t *payload;
+
+    if (is_boot_req)
+    {
+        if (p2s_0237_seq_pos == 0u)
+            payload = p2s_0237_resp_boot0;
+        else if (p2s_0237_seq_pos == 1u)
+            payload = p2s_0237_resp_boot1;
+        else
+            payload = p2s_0237_resp_boot2;
+    }
+    else
+    {
+        payload = p2s_0237_resp_run;
+    }
+
+    uint8_t resp[25];
+    memcpy(resp, payload, sizeof(resp));
+
+    if (payload != p2s_0237_resp_boot0)
+        resp[0] = (uint8_t)BAMBU_BUS_AMS_NUM;
+
+    if (!is_boot_req)
+    {
+        if (p2s_state == p2s_runtime_state::boot)
+            resp[21] = 0x1A;
+        else if (p2s_state == p2s_runtime_state::runtime)
+            resp[21] = 0x1B;
+        else
+            resp[21] = 0x1C;
+    }
+
+    bambubus_long_packge_data data;
+    data.datas = resp;
+    data.data_length = sizeof(resp);
+    data.package_number = printer_data_long.package_number;
+    data.type = printer_data_long.type;
+    data.source_address = printer_data_long.target_address;
+    data.target_address = printer_data_long.source_address;
+    bambubus_long_package_get(&data);
+
+    if (is_boot_req && p2s_0237_seq_pos < 0xFFu)
+        p2s_0237_seq_pos++;
+}
+
+static void get_package_p2s_long_023c(unsigned char *buf, int length)
+{
+    (void)buf;
+    (void)length;
+    if (bus_port_to_host.send_data_len != 0) return;
+
+    uint8_t resp[55];
+    const uint8_t byte14 = (p2s_023c_seq_pos & 1u) ? 0x06u : 0x10u;
+
+    if (p2s_state == p2s_runtime_state::boot)
+    {
+        if (p2s_023c_seq_pos < 2u)
+            build_023c_response(resp, byte14, 0x63, false, 0xF4, 0xE3);
+        else if (p2s_023c_seq_pos < 8u)
+            build_023c_response(resp, byte14, 0x63, true, 0xF4, 0xE3);
+        else if (p2s_023c_seq_pos < 12u)
+            build_023c_response(resp, byte14, 0x63, true, 0x4A, 0x45);
+        else
+            build_023c_response(resp, byte14, 0x00, true, 0x4A, 0x45);
+    }
+    else
+    {
+        build_023c_response(resp, byte14, 0x00, true, 0x4A, 0x45);
+        resp[49] = 0xFF;
+        resp[50] = 0x00;
+    }
+
+    bambubus_long_packge_data data;
+    data.datas = resp;
+    data.data_length = sizeof(resp);
+    data.package_number = printer_data_long.package_number;
+    data.type = printer_data_long.type;
+    data.source_address = printer_data_long.target_address;
+    data.target_address = printer_data_long.source_address;
+    bambubus_long_package_get(&data);
+
+    if (p2s_023c_seq_pos < 0xFFu)
+        p2s_023c_seq_pos++;
+}
 
 unsigned char long_packge_MC_online[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 void get_package_long_packge_MC_online(unsigned char *buf, int length)
@@ -859,28 +1102,37 @@ void get_package_long_packge_filament(unsigned char *buf, int length)
     bambubus_long_package_get(&data);
 }
 
-unsigned char long_packge_version_serial_number[] = {16, // 序列号长度=15
+unsigned char long_packge_version_serial_number[] = {15,
                                                      '0', 'E', 'A', '0', '3', '0', '3', '0', '3', '0', '3', '0', '0', '0', '0',
-                                                     '0', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                                     0x0E, 0xA0, 0x30, 0x30, 0x30, 0x30, 0x00, 0x00, // serial_number#2
+                                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                                     0x00,
+                                                     0x0E, 0xA0, 0x30, 0x30, 0x30, 0x30, 0x00, 0x00,
                                                      0x30, 0x30, 0x30, 0x30,
-                                                     0xFF, 0xFF, 0xFF, 0xFF,
-                                                     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xBB, 0x44, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00};
+                                                     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                                     0x00,
+                                                     0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00,
+                                                     0x00};
 
 void get_package_long_packge_serial_number(unsigned char *buf, int length)
 {
+    (void)buf;
+    (void)length;
+
     bambubus_long_packge_data data;
-    uint8_t ams_num = printer_data_long.datas[33];
+    uint8_t ams_num = (printer_data_long.data_length > 33) ? printer_data_long.datas[33] : (uint8_t)BAMBU_BUS_AMS_NUM;
+
     if ((ams_num >= 4) || (ams[bambubus_ams_map[ams_num]].online != true))
     {
         return;
     }
-    long_packge_version_serial_number[4] = 0x30 + ams_num; // 防止SN重复
-    long_packge_version_serial_number[34] = 0xA0 + ams_num;
+
     if (bambubus_ams_address != host_device_type_ams)
     {
         return;
     }
+
+    long_packge_version_serial_number[4] = 0x30 + ams_num; // ams num serial
+    long_packge_version_serial_number[34] = 0xA0 + ams_num;
 
     // long_packge_version_serial_number[0] = ams_ptr->serial_number_length;
 
@@ -905,7 +1157,7 @@ void get_package_long_packge_serial_number(unsigned char *buf, int length)
 //0x46 // 70
 //0x50 // 80
 //0x5A // 90
-unsigned char long_packge_version_version_and_name_AMS08[] = {0x00, 0x00, 0x1E, 0x0A , // verison number
+unsigned char long_packge_version_version_and_name_AMS08[] = {0x00, 0x00, 0x28, 0x0A , // verison number
                                                               0x41, 0x4D, 0x53, 0x30, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 //unsigned char long_packge_version_version_and_name_AMS2PRO[] = {
 //    0x00, 0x00, 0x00, 0x5A,
@@ -1081,6 +1333,18 @@ bambubus_package_type bambubus_run()
 
             case bambubus_package_type::serial_number:
                 get_package_long_packge_serial_number(buf, len);
+                break;
+
+            case bambubus_package_type::p2s_short_a0:
+                get_package_p2s_short_a0(buf, len);
+                break;
+
+            case bambubus_package_type::p2s_long_0237:
+                get_package_p2s_long_0237(buf, len);
+                break;
+
+            case bambubus_package_type::p2s_long_023c:
+                get_package_p2s_long_023c(buf, len);
                 break;
 
             case bambubus_package_type::set_filament_info:

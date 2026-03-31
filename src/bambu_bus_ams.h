@@ -17,6 +17,9 @@ enum class bambubus_package_type
     version,
     serial_number,
     heartbeat,
+    p2s_short_a0,
+    p2s_long_0237,
+    p2s_long_023c,
     ETC,
 
 

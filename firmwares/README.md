@@ -1,3 +1,9 @@
+ ____  __  __   ____  _   _
+| __ )|  \/  | / ___|| | | |
+|  _ \| |\/| || |    | | | |
+| |_) | |  | || |___ | |_| |
+|____/|_|  |_| \____| \___/
+
 ## Which firmware folder should I choose here?
 
 **Choose between:** soft_load(A1), standard(A1) or high_force_load(P1S)

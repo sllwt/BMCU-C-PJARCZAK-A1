@@ -1,3 +1,9 @@
+ ____  __  __   ____  _   _
+| __ )|  \/  | / ___|| | | |
+|  _ \| |\/| || |    | | | |
+| |_) | |  | || |___ | |_| |
+|____/|_|  |_| \____| \___/
+
 ## Which variant should I choose?
 
 **Choose between:** FILAMENT_RGB_ON and FILAMENT_RGB_OFF.

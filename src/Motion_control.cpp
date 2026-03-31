@@ -561,8 +561,8 @@ static inline void MC_PULL_ONLINE_read(uint32_t now_ticks)
     if ((num != 0xFF) && (num < kChCount) && filament_channel_inserted[num])
     {
         const uint8_t pct = MC_PULL_pct[num];
-        const uint32_t hi = (pct > 50u) ? (uint32_t)(pct - 50u) : 0u;
-        A.pressure = (int)((hi * 65535u) / 50u);
+            const uint32_t hi = (pct > 50u) ? (uint32_t)(pct - 50u) : 0u;
+            A.pressure = (int)((hi * 65535u) / 50u);
     }
     else
     {
@@ -2231,9 +2231,18 @@ static void motor_motion_switch(uint64_t time_now)
             {
                 if (g_on_use_jam_latch[num])
                 {
-                    MOTOR_CONTROL[num].set_motion(filament_motion_enum::filament_motion_stop, 100, time_now);
-                    MC_STU_RGB_set_latch(num, 0x00u, 0xD5u, 0x2Au, time_now, 0u);
-                    break;
+                    if (MC_PULL_pct_f[num] > 85.0f)
+                    {
+                        g_on_use_low_latch[num] = 0u;
+                        g_on_use_jam_latch[num] = 0u;
+                        g_on_use_hi_pwm_us[num] = 0u;
+                    }
+                    else
+                    {
+                        MOTOR_CONTROL[num].set_motion(filament_motion_enum::filament_motion_stop, 100, time_now);
+                        MC_STU_RGB_set_latch(num, 0x00u, 0xD5u, 0x2Au, time_now, 0u);
+                        break;
+                    }
                 }
 
                 MC_STU_RGB_set_latch(num, 0x00u, 0xD5u, 0x2Au, time_now, 0u);
@@ -2608,6 +2617,10 @@ void Motion_control_run(int error)
     const uint64_t now_ms      = time_ms_fast_from_ticks64(now_ticks64);
 
     MC_PULL_ONLINE_read(now_ticks);
+
+    const uint8_t loaded_ch = ams_state_get_loaded();
+    if ((loaded_ch < kChCount) && (MC_ONLINE_key_stu[loaded_ch] == 0u))
+        ams_state_set_unloaded(loaded_ch);
 
     auto &A = ams[motion_control_ams_num];
 

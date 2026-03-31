@@ -1,3 +1,9 @@
+ ____  __  __   ____  _   _
+| __ )|  \/  | / ___|| | | |
+|  _ \| |\/| || |    | | | |
+| |_) | |  | || |___ | |_| |
+|____/|_|  |_| \____| \___/
+
 ## Which variant should I choose?
 
 **Choose between:** AUTOLOAD and NO_AUTOLOAD.
