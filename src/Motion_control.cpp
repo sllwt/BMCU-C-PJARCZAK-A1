@@ -238,6 +238,22 @@ static float    dm_auto_last_m[4]       = {0,0,0,0};
 static uint64_t dm_loaded_drop_t0_ms[4] = {0ull,0ull,0ull,0ull};
 #endif
 
+static constexpr float    AUTO_UNLOAD_START_PCT      = 80.0f;
+static constexpr float    AUTO_UNLOAD_NEUTRAL_LO_PCT = 45.0f;
+static constexpr float    AUTO_UNLOAD_NEUTRAL_HI_PCT = 55.0f;
+static constexpr float    AUTO_UNLOAD_ABORT_PCT      = 35.0f;
+static constexpr uint64_t AUTO_UNLOAD_ARM_MS         = 1000ull;
+static constexpr uint64_t AUTO_UNLOAD_MAX_MS         = 15000ull;
+static constexpr uint64_t AUTO_UNLOAD_EMPTY_MS       = 1500ull;
+static constexpr float    AUTO_UNLOAD_PWM_PULL       = 850.0f;
+
+static uint8_t  auto_unload_arm[4]          = {0,0,0,0};
+static uint8_t  auto_unload_active[4]       = {0,0,0,0};
+static uint8_t  auto_unload_blocked[4]      = {0,0,0,0};
+static uint64_t auto_unload_arm_t0_ms[4]    = {0ull,0ull,0ull,0ull};
+static uint64_t auto_unload_active_t0_ms[4] = {0ull,0ull,0ull,0ull};
+static uint64_t auto_unload_empty_t0_ms[4]  = {0ull,0ull,0ull,0ull};
+
 bool filament_channel_inserted[4]       = {false, false, false, false}; // czy kanał fizycznie wpięty
 
 static constexpr float MC_PULL_PIDP_PCT = 25.0f;
@@ -267,7 +283,7 @@ static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
     static constexpr int   MC_LOAD_S1_HARD_STOP_PCT  = 97;  // bezpiecznik
     static constexpr int   MC_LOAD_S1_HARD_HYS       = 2;   // wróć dopiero < (HARD_STOP - HYS)
     // Stage2 (hold_load)
-    static constexpr float MC_LOAD_S2_HOLD_TARGET_PCT    = 97.0f;
+    static constexpr float MC_LOAD_S2_HOLD_TARGET_PCT    = 95.0f;
     static constexpr float MC_LOAD_S2_HOLD_BAND_LO_DELTA = 1.0f;   // push_hi = hold_target - delta
     static constexpr float MC_LOAD_S2_PUSH_START_PCT     = 88.0f;  // start push PWM
     static constexpr float MC_LOAD_S2_PWM_HI             = 550.0f;
@@ -306,7 +322,6 @@ static uint32_t g_hold_t0_ticks = 0;
 static uint64_t g_last_on_use_exit_ms[4] = {0,0,0,0};
 
 extern void RGB_update();
-extern bool Flash_MC_PULL_cal_clear();
 
 static inline bool all_no_filament()
 {
@@ -343,8 +358,7 @@ static void calibration_reset_and_reboot()
 
     blink_all_blue_3s();
 
-    Flash_MC_PULL_cal_clear();
-    Flash_Motion_clear();
+    Flash_NVM_full_clear();
 
     NVIC_SystemReset();
 }
@@ -1907,10 +1921,10 @@ public:
                         const uint32_t add_us = (uint32_t)(time_E * 1000000.0f + 0.5f);
 
                         uint32_t t1 = g_on_use_hi_pwm_us[CHx] + add_us;
-                        if (t1 > 8000000u) t1 = 8000000u;
+                        if (t1 > 20000000u) t1 = 20000000u;
                         g_on_use_hi_pwm_us[CHx] = t1;
 
-                        if (t1 >= 8000000u)
+                        if (t1 >= 20000000u)
                         {
                             g_on_use_low_latch[CHx] = 1u;
                             g_on_use_jam_latch[CHx] = 0u;
@@ -2522,12 +2536,114 @@ static void motor_motion_run(int error, uint64_t time_now, uint32_t now_ticks)
             continue;
         }
 
+        if (!filament_channel_inserted[i] ||
+            (!auto_unload_active[i] && MOTOR_CONTROL[i].motion != filament_motion_enum::filament_motion_pressure_ctrl_idle))
+        {
+            auto_unload_arm[i]          = 0u;
+            auto_unload_active[i]       = 0u;
+            auto_unload_blocked[i]      = 0u;
+            auto_unload_arm_t0_ms[i]    = 0ull;
+            auto_unload_active_t0_ms[i] = 0ull;
+            auto_unload_empty_t0_ms[i]  = 0ull;
+        }
+        else
+        {
+            const float pct = MC_PULL_pct_f[i];
+            const uint8_t ks = MC_ONLINE_key_stu[i];
+
+            if (pct >= AUTO_UNLOAD_START_PCT)
+            {
+                auto_unload_blocked[i] = 0u;
+
+                if (!auto_unload_arm[i] && !auto_unload_active[i])
+                {
+                    auto_unload_arm[i] = 1u;
+                    auto_unload_arm_t0_ms[i] = time_now;
+                }
+            }
+
+            if (auto_unload_arm[i] && !auto_unload_active[i])
+            {
+                const uint64_t dt = time_now - auto_unload_arm_t0_ms[i];
+
+                if ((pct > AUTO_UNLOAD_NEUTRAL_LO_PCT) && (pct < AUTO_UNLOAD_NEUTRAL_HI_PCT))
+                {
+                    if (!auto_unload_blocked[i] && dt <= AUTO_UNLOAD_ARM_MS)
+                    {
+                        auto_unload_active[i]       = 1u;
+                        auto_unload_active_t0_ms[i] = time_now;
+                        auto_unload_empty_t0_ms[i]  = 0ull;
+                        auto_unload_blocked[i]      = 1u;
+                    }
+
+                    auto_unload_arm[i]       = 0u;
+                    auto_unload_arm_t0_ms[i] = 0ull;
+                }
+                else if (dt > AUTO_UNLOAD_ARM_MS)
+                {
+                    auto_unload_arm[i]       = 0u;
+                    auto_unload_arm_t0_ms[i] = 0ull;
+                }
+            }
+
+            if (auto_unload_active[i])
+            {
+                if (pct < AUTO_UNLOAD_ABORT_PCT)
+                {
+                    auto_unload_active[i]       = 0u;
+                    auto_unload_active_t0_ms[i] = 0ull;
+                    auto_unload_empty_t0_ms[i]  = 0ull;
+                    auto_unload_blocked[i]      = 1u;
+                }
+                else if (ks == 1u)
+                {
+                    auto_unload_empty_t0_ms[i] = 0ull;
+
+                    if ((time_now - auto_unload_active_t0_ms[i]) >= AUTO_UNLOAD_MAX_MS)
+                    {
+                        auto_unload_active[i]       = 0u;
+                        auto_unload_active_t0_ms[i] = 0ull;
+                        auto_unload_empty_t0_ms[i]  = 0ull;
+                        auto_unload_blocked[i]      = 1u;
+                    }
+                }
+                else
+                {
+                    if (auto_unload_empty_t0_ms[i] == 0ull)
+                    {
+                        auto_unload_empty_t0_ms[i] = time_now;
+                    }
+                    else if ((time_now - auto_unload_empty_t0_ms[i]) >= AUTO_UNLOAD_EMPTY_MS)
+                    {
+                        auto_unload_active[i]       = 0u;
+                        auto_unload_active_t0_ms[i] = 0ull;
+                        auto_unload_empty_t0_ms[i]  = 0ull;
+                        auto_unload_blocked[i]      = 1u;
+                    }
+                }
+            }
+        }
+
         const bool manual_empty_pull =
             filament_channel_inserted[i] &&
             (MC_ONLINE_key_stu[i] == 0u) &&
-            (MC_PULL_pct_f[i] > 80.0f);
+            (MC_PULL_pct_f[i] > 80.0f) &&
+            (auto_unload_active[i] == 0u);
 
-        if (manual_empty_pull)
+        if (auto_unload_active[i])
+        {
+            float x = MOTOR_CONTROL[i].dir * AUTO_UNLOAD_PWM_PULL;
+            if (x * MOTOR_CONTROL[i].dir < 0.0f) x = 0.0f;
+
+            MOTOR_CONTROL[i].PID_speed.clear();
+            MOTOR_CONTROL[i].PID_pressure.clear();
+            MOTOR_CONTROL[i].pwm_zeroed = (x == 0.0f) ? 1u : 0u;
+            _MOTOR_CONTROL::x_prev[i] = x;
+
+            Motion_control_set_PWM(i, (int)x);
+            MC_STU_RGB_set_latch(i, 0xA0u, 0x2Du, 0xFFu, time_now, 1u);
+        }
+        else if (manual_empty_pull)
         {
             float x = MOTOR_CONTROL[i].dir * 700.0f;
             if (x * MOTOR_CONTROL[i].dir < 0.0f) x = 0.0f;
@@ -2571,7 +2687,7 @@ static void motor_motion_run(int error, uint64_t time_now, uint32_t now_ticks)
             if (hi_thr < 0) hi_thr = 0;
         }
 
-        if ((int)pct >= hi_thr)
+        if (!(m == filament_motion_enum::filament_motion_before_on_use) && (int)pct >= hi_thr)
         {
             r = 0x10u;
         }

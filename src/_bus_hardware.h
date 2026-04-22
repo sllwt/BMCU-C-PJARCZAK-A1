@@ -9,6 +9,8 @@ enum class _bus_data_type : uint8_t
     none = 0x00
 };
 
+void bambubus_heartbeat_seen_fast(void);
+
 class _bus_port_deal // 中断数据处理
 {
 public:
@@ -24,6 +26,7 @@ private:
     uint8_t data_CRC8_index = 0;
     _bus_data_type irq_package_type = _bus_data_type::none;
     uint8_t *bus_irq_data_ptr = recv_data_buf[0];
+    int drop_bytes = 0;
     void (*port_send_datas)(uint8_t *data, uint16_t len);
 
 public:
@@ -46,6 +49,7 @@ public:
         data_CRC8_index = 0;
         irq_package_type = _bus_data_type::none;
         bus_irq_data_ptr = recv_data_buf[0];
+        drop_bytes = 0;
         bus_recv_data_ptr = recv_data_buf[1];
         idle = true;
         send_data_len = 0;
@@ -56,10 +60,17 @@ public:
 
     void irq(uint8_t data)
     {
+        if (drop_bytes > 0)
+        {
+            if (--drop_bytes == 0)
+                bambubus_heartbeat_seen_fast();
+            return;
+        }
+
         const int BUF_SZ = (int)sizeof(recv_data_buf[0]);
         int idx = _index;
 
-        if (idx == 0) // 状态为等待帧头
+        if (idx == 0)
         {
             if (data == 0x3D || data == 0x33)
             {
@@ -81,32 +92,28 @@ public:
         uint8_t *buf = bus_irq_data_ptr;
         buf[idx] = data;
 
-        if (idx == 1) // 包类型字节
+        if (idx == 1)
         {
-            if (data & 0x80) // 短帧头
+            if (data & 0x80)
             {
                 data_length_index = 2;
                 data_CRC8_index = 3;
             }
-            else // 长帧头
+            else
             {
                 data_CRC8_index = 6;
                 data_length_index = (irq_package_type == _bus_data_type::bambubus) ? 5 : 4;
             }
         }
 
-        if (idx == data_length_index) // 数据长度字节
+        if (idx == data_length_index)
         {
             if (irq_package_type == _bus_data_type::bambubus)
             {
                 if (data_length_index == 2)
-                {
                     length = data;
-                }
                 else
-                {
                     length = (int)buf[4] | ((int)data << 8);
-                }
             }
             else if (irq_package_type == _bus_data_type::ahub_bus)
             {
@@ -120,7 +127,7 @@ public:
             }
         }
 
-        if (idx == data_CRC8_index) // CRC8校验字节
+        if (idx == data_CRC8_index)
         {
             if (data != bus_crc8(buf, (uint32_t)data_CRC8_index))
             {
@@ -129,11 +136,33 @@ public:
             }
         }
 
+        if (irq_package_type == _bus_data_type::bambubus &&
+            idx == 4 &&
+            data_length_index == 2 &&
+            length >= 6 &&
+            buf[1] == 0xC5 &&
+            data == 0x20)
+        {
+            const int remain = length - 5;
+            _index = 0;
+
+            if (remain > 0)
+            {
+                drop_bytes = remain;
+            }
+            else
+            {
+                bambubus_heartbeat_seen_fast();
+            }
+            return;
+        }
+
         ++idx;
 
-        if (idx >= length) // 接收完毕，交换缓冲器指针
+        if (idx >= length)
         {
             _index = 0;
+
             if (recv_data_len == 0)
             {
                 uint8_t *tmp = bus_recv_data_ptr;

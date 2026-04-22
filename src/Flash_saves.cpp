@@ -22,6 +22,25 @@ static inline uint32_t ams_fil_page(uint8_t filament_idx)
     return FLASH_NVM_AMS_ADDR + (uint32_t)filament_idx * FLASH_NVM256_PAGE_SIZE;
 }
 
+static constexpr uint32_t FLASH_ERASED_WORD = 0xE339E339u;
+
+static inline bool flash_word_is_blank(uint32_t v)
+{
+    return v == FLASH_ERASED_WORD || v == 0xFFFFFFFFu;
+}
+
+static bool flash_range_is_erased(uint32_t base_addr, uint32_t bytes)
+{
+    const uint32_t* p = (const uint32_t*)base_addr;
+
+    for (uint32_t i = 0u; i < (bytes >> 2); i++)
+    {
+        if (p[i] != FLASH_ERASED_WORD) return false;
+    }
+
+    return true;
+}
+
 static bool flash256_prog(uint32_t page_addr, const uint32_t w[64])
 {
     if (page_addr & (FLASH_NVM256_PAGE_SIZE - 1u)) return false;
@@ -53,7 +72,7 @@ static bool flash256_erase(uint32_t page_addr)
     FLASH_Lock();
     irq_restore_wch(irq);
 
-    return true;
+    return flash_range_is_erased(page_addr, FLASH_NVM256_PAGE_SIZE);
 }
 
 static bool flash_word_prog_std(uint32_t addr, uint32_t data)
@@ -116,7 +135,7 @@ static bool nvm256_read(uint32_t page_addr, uint32_t magic, uint16_t ver,
     const uint8_t* b = (const uint8_t*)page_addr;
 
     const uint32_t stored = *(const uint32_t*)(b + NVM256_CRC_OFF);
-    if (stored == 0xFFFFFFFFu) return false;
+    if (flash_word_is_blank(stored)) return false;
 
     const uint32_t crc = crc32_hw_words(b, NVM256_CRC_OFF);
     if (crc != stored) return false;
@@ -170,7 +189,7 @@ static bool fil_scan_page(uint32_t base, Flash_FilamentInfo* last, uint32_t* fir
     {
         const uint32_t* p = (const uint32_t*)(base + s * FIL_SLOT_BYTES);
 
-        if (p[0] == 0xFFFFFFFFu)
+        if (flash_word_is_blank(p[0]))
         {
             if (first_empty && *first_empty == FIL_SLOTS_PER_PAGE)
                 *first_empty = s;
@@ -223,6 +242,35 @@ static uint16_t g_sta_slot = 0u;
 static uint8_t g_sta_have_saved = 0u;
 static uint8_t g_sta_saved_loaded = 0xFFu;
 
+static void flash_runtime_cache_clear(void)
+{
+    memset(g_fil_have, 0, sizeof(g_fil_have));
+    memset(g_fil_first_empty, 0, sizeof(g_fil_first_empty));
+    memset(g_fil_last, 0, sizeof(g_fil_last));
+
+    g_sta_seq = 0u;
+    g_sta_slot = 0u;
+    g_sta_have_saved = 0u;
+    g_sta_saved_loaded = 0xFFu;
+}
+
+bool Flash_NVM_full_clear(void)
+{
+    const uint32_t irq = irq_save_wch();
+
+    FLASH_Unlock();
+    FLASH_ClearFlag(FLASH_FLAG_BSY | FLASH_FLAG_EOP | FLASH_FLAG_WRPRTERR);
+    const FLASH_Status st = FLASH_ErasePage(FLASH_NVM_BASE_ADDR);
+    FLASH_Lock();
+    irq_restore_wch(irq);
+
+    if (st != FLASH_COMPLETE) return false;
+    if (!flash_range_is_erased(FLASH_NVM_BASE_ADDR, FLASH_NVM_TOTAL_SIZE)) return false;
+
+    flash_runtime_cache_clear();
+    return true;
+}
+
 static inline uint32_t sta_page_addr(uint32_t page_i)
 {
     return FLASH_NVM_BASE_ADDR + (STA_PAGE_FIRST + page_i) * FLASH_NVM256_PAGE_SIZE;
@@ -239,18 +287,14 @@ void Flash_saves_init(void)
 {
     RCC_AHBPeriphClockCmd(RCC_AHBPeriph_CRC, ENABLE);
 
+    flash_runtime_cache_clear();
+
     for (uint8_t i = 0u; i < 4u; i++)
         fil_cache_load_one(i);
-
-    g_sta_seq = 0u;
-    g_sta_slot = 0u;
-    g_sta_have_saved = 0u;
-    g_sta_saved_loaded = 0xFFu;
 }
 
-bool Flash_AMS_filament_write(uint8_t filament_idx, const Flash_FilamentInfo* info, uint8_t loaded_ch)
+bool Flash_AMS_filament_write(uint8_t filament_idx, const Flash_FilamentInfo* info)
 {
-    (void)loaded_ch;
     if (!info || filament_idx >= 4u) return false;
 
     if (g_fil_have[filament_idx] &&
@@ -315,7 +359,7 @@ bool Flash_AMS_state_read(uint8_t* loaded_ch)
         const uint32_t w0 = *(const volatile uint32_t*)(a + 0u);
         const uint32_t w1 = *(const volatile uint32_t*)(a + 4u);
 
-        if (w0 == 0xFFFFFFFFu && w1 == 0xFFFFFFFFu) continue;
+        if (flash_word_is_blank(w0) && flash_word_is_blank(w1)) continue;
         if ((w0 >> 24) != STA_TAG) continue;
         if ((w0 ^ w1) != MAGIC_STA) continue;
 
@@ -350,10 +394,8 @@ bool Flash_AMS_state_read(uint8_t* loaded_ch)
     return true;
 }
 
-bool Flash_AMS_state_write(uint8_t loaded_ch, const Flash_FilamentInfo* filament0_info)
+bool Flash_AMS_state_write(uint8_t loaded_ch)
 {
-    (void)filament0_info;
-
     if (g_sta_have_saved && g_sta_saved_loaded == loaded_ch)
         return true;
 

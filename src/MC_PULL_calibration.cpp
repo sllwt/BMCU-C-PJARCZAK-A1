@@ -93,6 +93,16 @@ static void blink_one(int ch, uint8_t r, uint8_t g, uint8_t b, int times = 3, in
     }
 }
 
+static void show_diag_step(uint8_t r, uint8_t g, uint8_t b, int on_ms = 360, int off_ms = 180)
+{
+    for (int ch = 0; ch < 4; ch++) MC_PULL_ONLINE_RGB_set(ch, r, g, b);
+    RGB_update();
+    delay(on_ms);
+    for (int ch = 0; ch < 4; ch++) MC_PULL_ONLINE_RGB_set(ch, 0, 0, 0);
+    RGB_update();
+    delay(off_ms);
+}
+
 static bool capture_first_extreme_wait_release(int ch, float center_v, float &out_best_norm, int8_t &out_pol)
 {
     const uint32_t tpm = time_hw_ticks_per_ms();
@@ -276,8 +286,7 @@ static void capture_minmax_one_ch_event(int ch, float center_v, float &out_min, 
 
 void MC_PULL_calibration_clear()
 {
-    Flash_MC_PULL_cal_clear();
-    Flash_Motion_clear();
+    Flash_NVM_full_clear();
 }
 
 void MC_PULL_calibration_boot()
@@ -299,6 +308,8 @@ void MC_PULL_calibration_boot()
         }
         return;
     }
+
+    const bool ok_wipe = Flash_NVM_full_clear();
 
     double sum_raw[4] = {0, 0, 0, 0};
     double sum_key[4] = {0, 0, 0, 0};
@@ -383,10 +394,19 @@ void MC_PULL_calibration_boot()
 
     const bool ok_cal = Flash_MC_PULL_cal_write_all(MC_PULL_V_OFFSET, MC_PULL_V_MIN, MC_PULL_V_MAX, MC_PULL_POLARITY);
     const bool ok_mot = Motion_control_save_dm_key_none_thresholds();
-    const bool ok = ok_cal && ok_mot;
+    const bool ok = ok_wipe && ok_cal && ok_mot;
 
-    if (!ok) blink_all(0x10, 0x00, 0x00, 6, 80, 80);
-    else     blink_all(0x10, 0x10, 0x00, 6, 60, 60);
+    if (ok_wipe) show_diag_step(0x00, 0x10, 0x10);
+    else         show_diag_step(0x10, 0x00, 0x00, 460, 220);
+
+    if (ok_cal) show_diag_step(0x10, 0x10, 0x00);
+    else        show_diag_step(0x10, 0x00, 0x10, 460, 220);
+
+    if (ok_mot) show_diag_step(0x00, 0x00, 0x10);
+    else        show_diag_step(0x10, 0x10, 0x10, 460, 220);
+
+    if (ok) blink_all(0x00, 0x10, 0x00, 2, 220, 220);
+    else    blink_all(0x10, 0x00, 0x00, 2, 260, 260);
 
     delay(200);
 }

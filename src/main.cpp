@@ -136,7 +136,7 @@ static void ams_state_save_run()
 {
     if (!g_state_dirty) return;
 
-    if (Flash_AMS_state_write(g_loaded_ch, nullptr))
+    if (Flash_AMS_state_write(g_loaded_ch))
         g_state_dirty = 0u;
 }
 
@@ -159,7 +159,7 @@ void ams_datas_save_run()
     Flash_FilamentInfo now;
     ram_to_flashinfo(fil, &now);
 
-    if (Flash_AMS_filament_write(fil, &now, g_loaded_ch))
+    if (Flash_AMS_filament_write(fil, &now))
         g_fil_dirty &= (uint8_t)~(1u << fil);
 }
 
@@ -219,6 +219,7 @@ int main(void)
     }
 
     Motion_control_init();
+    bambubus_init();
     bus_init();
 
     DEBUG("START\n");

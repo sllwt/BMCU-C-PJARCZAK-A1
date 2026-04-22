@@ -37,8 +37,8 @@ struct _filament
     bool online = true;
     _filament_motion motion = _filament_motion::idle;
     uint8_t seal_status = 0;            // 0:无密封结构 1:已开盖 2:已合盖
-    int8_t compartment_temperature = 0; // 温度:-128℃到127℃
-    uint8_t compartment_humidity = 0;   // 湿度：0%到100%
+    int8_t compartment_temperature = 22; // 温度:-128℃到127℃
+    uint8_t compartment_humidity = 20;   // 湿度：0%到100%
 
     float meters __attribute__((aligned(4))) = 1.0f;
     float meters_virtual_count __attribute__((aligned(4))) = 0.0f;
@@ -67,8 +67,8 @@ struct _filament
         meters_virtual_count = 0;
         online = true;
         motion = _filament_motion::idle;
-        compartment_temperature = 0;
-        compartment_humidity = 0;
+        compartment_temperature = 22;
+        compartment_humidity = 20;
     }
 
 } __attribute__((packed, aligned(4)));

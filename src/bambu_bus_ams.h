@@ -17,15 +17,11 @@ enum class bambubus_package_type
     version,
     serial_number,
     heartbeat,
-    p2s_short_a0,
-    p2s_long_0237,
-    p2s_long_023c,
     ETC,
-
 
     __BambuBus_package_packge_type_size
 };
 
-
+void bambubus_init(void);
+void bambubus_heartbeat_seen_fast(void);
 extern bambubus_package_type bambubus_run();
-extern uint16_t bambubus_ams_address;

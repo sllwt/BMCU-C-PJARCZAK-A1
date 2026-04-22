@@ -213,6 +213,15 @@ This firmware has undergone solid testing, and no issues are expected.
 
 # Changelog
 
+## V10.5
+
+### User-visible changes
+- Added **automatic filament unload when the buffer is lifted manually**.
+- The serial is generated from the MCU hardware UID, so devices no longer share the same SN.
+- Calibration now performs a **full NVM cleanup**.
+- Fixed the rare issue where the **system LED could blink incorrectly** on some BMCU units.
+- Fixed the **external fan issue on Bambu Lab P2S**.
+
 ## V10.4
 
 ### User-visible changes

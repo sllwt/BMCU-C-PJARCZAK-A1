@@ -13,6 +13,8 @@
 #define FLASH_NVM_AMS_ADDR    (FLASH_NVM_BASE_ADDR + 0x200) // 4x256B (0..3) => do +0x5FF
 
 #define FLASH_NVM256_PAGE_SIZE (256u)
+#define FLASH_NVM_TOTAL_SIZE    (4096u)
+#define FLASH_NVM_PAGE_COUNT    (FLASH_NVM_TOTAL_SIZE / FLASH_NVM256_PAGE_SIZE)
 #define NVM256_CRC_OFF         (252u)
 
 // Magici / wersje
@@ -46,16 +48,17 @@ void Flash_saves_init(void);
 
 // AMS: 4x 256B
 bool Flash_AMS_filament_read(uint8_t filament_idx, Flash_FilamentInfo* out);
-bool Flash_AMS_filament_write(uint8_t filament_idx, const Flash_FilamentInfo* info, uint8_t loaded_channel);
+bool Flash_AMS_filament_write(uint8_t filament_idx, const Flash_FilamentInfo* info);
 bool Flash_AMS_filament_clear(uint8_t filament_idx);
 
 bool Flash_AMS_state_read(uint8_t* loaded_channel);
-bool Flash_AMS_state_write(uint8_t loaded_channel, const Flash_FilamentInfo* filament0_info);
+bool Flash_AMS_state_write(uint8_t loaded_channel);
 
 // CAL: 1x 256B
 bool Flash_MC_PULL_cal_read(float offs[4], float vmin[4], float vmax[4], int8_t pol[4]);
 bool Flash_MC_PULL_cal_write_all(const float offs[4], const float vmin[4], const float vmax[4], const int8_t pol[4]);
 bool Flash_MC_PULL_cal_clear(void);
+bool Flash_NVM_full_clear(void);
 
 // MOT: 1x 256B
 bool Flash_Motion_read(void* out, uint16_t bytes);
