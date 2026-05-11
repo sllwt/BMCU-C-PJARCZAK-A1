@@ -1870,7 +1870,7 @@ public:
             {
                 const float pct = MC_PULL_pct_f[CHx];
 
-                if (pct < 40.0f)
+                if (pct < 20.0f)
                 {
                     g_on_use_low_latch[CHx] = 1u;
                     g_on_use_jam_latch[CHx] = 1u;
