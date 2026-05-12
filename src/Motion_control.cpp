@@ -726,7 +726,7 @@ public:
 
     bool send_stop_latch = false;
 
-    MOTOR_PID PID_speed    = MOTOR_PID(2, 20, 0);
+    MOTOR_PID PID_speed    = MOTOR_PID(2.7, 17, 0.3);
     MOTOR_PID PID_pressure = MOTOR_PID(MC_PULL_PIDP_PCT, 0, 0);
 
     float pwm_zero = 500;
@@ -1654,7 +1654,7 @@ public:
                     {
                         constexpr uint64_t SEND_SOFTSTART_MS = 300ull;
                         constexpr float    V0 = 10.0f;
-                        constexpr float    V  = 90.0f;
+                        constexpr float    V  = 80.0f;
 
                         const uint64_t dt = (send_start_ms != 0) ? (now_ms - send_start_ms) : 1000000ull;
 
