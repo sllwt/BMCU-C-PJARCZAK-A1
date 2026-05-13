@@ -667,7 +667,7 @@ public:
         
         if (absf(E) > 25.0f)
             integral_enabled = false;
-        else if (absf(E) < 15.0f)
+        else if (absf(E) <= 15.0f)
             integral_enabled = true;
     
         I_save += (integral_enabled ? I : 0.0f) * E * time_E;
