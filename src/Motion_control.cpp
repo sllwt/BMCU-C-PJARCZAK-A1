@@ -663,7 +663,15 @@ public:
 
     float caculate(float E, float time_E)
     {
-        I_save += I * E * time_E;
+        static bool integral_enabled = true;
+    
+        if (fabs(E) > 25.0f)
+            integral_enabled = false;
+        else if (fabs(E) < 15.0f)
+            integral_enabled = true;
+    
+        I_save += (integral_enabled ? I : 0.0f) * E * time_E;
+        
         if (I_save > pid_range)  I_save = pid_range;
         if (I_save < -pid_range) I_save = -pid_range;
 
@@ -726,7 +734,7 @@ public:
 
     bool send_stop_latch = false;
 
-    MOTOR_PID PID_speed    = MOTOR_PID(2.7, 17, 0.3);
+    MOTOR_PID PID_speed    = MOTOR_PID(2.7, 15, 0.2);
     MOTOR_PID PID_pressure = MOTOR_PID(MC_PULL_PIDP_PCT, 0, 0);
 
     float pwm_zero = 500;
