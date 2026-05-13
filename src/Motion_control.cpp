@@ -663,12 +663,12 @@ public:
 
     float caculate(float E, float time_E)
     {
-        static bool integral_enabled = true;
+        static unsigned char integral_enabled = 1;
     
         if (fabs(E) > 25.0f)
-            integral_enabled = false;
+            integral_enabled = 0;
         else if (fabs(E) < 15.0f)
-            integral_enabled = true;
+            integral_enabled = 1;
     
         I_save += (integral_enabled ? I : 0.0f) * E * time_E;
         
