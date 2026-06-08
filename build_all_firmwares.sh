@@ -80,9 +80,15 @@ for p1s in 0; do
       mkdir -p "${base}/AMS_A"  # 只创建AMS_A文件夹
       cp -f "${TXT_SLOTS}" "${base}/${OUT_GUIDE}"
 
-      # 不编译SOLO版本，只编译AMS_A
-      for slot in A; do
-        ams_num=0
+      # 不编译SOLO版本
+      for slot in A B C D; do
+        case "${slot}" in
+          A) ams_num=0 ;;
+          B) ams_num=1 ;;
+          C) ams_num=2 ;;
+          D) ams_num=3 ;;
+        esac
+        
         # 编译所有回抽长度
         for r in "${RETRACTS[@]}"; do
           build_and_copy \
