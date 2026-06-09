@@ -240,9 +240,9 @@ static uint64_t dm_loaded_drop_t0_ms[4] = {0ull,0ull,0ull,0ull};
 
 bool filament_channel_inserted[4]       = {false, false, false, false}; // czy kanał fizycznie wpięty
 
-static constexpr float MC_PULL_PIDP_PCT = 30.0f;
+static constexpr float MC_PULL_PIDP_PCT = 40.0f;
 
-static constexpr int MC_PULL_DEADBAND_PCT_LOW  = 42;
+static constexpr int MC_PULL_DEADBAND_PCT_LOW  = 45;
 static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
 
 // ================ LOAD CONTROL ======================
@@ -734,7 +734,7 @@ public:
 
     bool send_stop_latch = false;
 
-    MOTOR_PID PID_speed    = MOTOR_PID(2.0, 10, 0.4);
+    MOTOR_PID PID_speed    = MOTOR_PID(2, 20, 0);
     MOTOR_PID PID_pressure = MOTOR_PID(MC_PULL_PIDP_PCT, 0, 0);
 
     float pwm_zero = 500;
