@@ -1,7 +1,7 @@
 name: 自动编译固件
 
 # 触发条件：当您推送代码到任何分支时自动运行
-# on: [push, pull_request]
+on: [push, pull_request]
 
 jobs:
   build:                    # 注意这里需要缩进2空格
