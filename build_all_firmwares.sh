@@ -77,7 +77,7 @@ for p1s in 0; do
     for rgb in 1; do
       rgb_dir="FILAMENT_RGB_ON"
       base="${dm_base}/${rgb_dir}"
-      mkdir -p "${base}/AMS_A"  # 只创建AMS_A文件夹
+      mkdir -p "${base}"/{SOLO,AMS_A,AMS_B,AMS_C,AMS_D}
       cp -f "${TXT_SLOTS}" "${base}/${OUT_GUIDE}"
 
       # 不编译SOLO版本
