@@ -2547,7 +2547,7 @@ static void motor_motion_run(int error, uint64_t time_now, uint32_t now_ticks)
         {
             r = 0x10u;
         }
-        else if (pct <= 30u)
+        else if (pct <= MC_PULL_DEADBAND_PCT_LOW)
         {
             b = 0x10u;
         }
