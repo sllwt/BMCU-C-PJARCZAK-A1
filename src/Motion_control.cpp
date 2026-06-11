@@ -155,8 +155,8 @@ static constexpr uint8_t kAS5600_OK_RECOVER  = 2;
 static inline bool AS5600_is_good(uint8_t ch) { return g_as5600_good[ch] != 0; }
 
 // ---- liniowe zwalnianie końcówki + minimalny PWM ----
-static constexpr float PULL_V_FAST   = 80.0f;   // mm/s
-static constexpr float PULL_V_END    = 10.0f;   // mm/s na samym końcu
+static constexpr float PULL_V_FAST   = 70.0f;   // mm/s
+static constexpr float PULL_V_END    = 12.0f;   // mm/s na samym końcu
 static constexpr float PULL_RAMP_M   = 0.015f;  // 15mm strefa hamowania
 static constexpr float PULL_PWM_MIN  = 400.0f;  // "kop" przy pullback
 
@@ -240,9 +240,9 @@ static uint64_t dm_loaded_drop_t0_ms[4] = {0ull,0ull,0ull,0ull};
 
 bool filament_channel_inserted[4]       = {false, false, false, false}; // czy kanał fizycznie wpięty
 
-static constexpr float MC_PULL_PIDP_PCT = 40.0f;
+static constexpr float MC_PULL_PIDP_PCT = 30.0f;
 
-static constexpr int MC_PULL_DEADBAND_PCT_LOW  = 45;
+static constexpr int MC_PULL_DEADBAND_PCT_LOW  = 40;
 static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
 
 // ================ LOAD CONTROL ======================
@@ -263,13 +263,13 @@ static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
     static constexpr float MC_ON_USE_BAND_HI_PCT   = 65.0f;
 #else        // A1
     // Stage1
-    static constexpr int   MC_LOAD_S1_FAST_PCT       = 82;
-    static constexpr int   MC_LOAD_S1_HARD_STOP_PCT  = 92;  // bezpiecznik
+    static constexpr int   MC_LOAD_S1_FAST_PCT       = 85;
+    static constexpr int   MC_LOAD_S1_HARD_STOP_PCT  = 95;  // bezpiecznik
     static constexpr int   MC_LOAD_S1_HARD_HYS       = 2;   // wróć dopiero < (HARD_STOP - HYS)
     // Stage2 (hold_load)
     static constexpr float MC_LOAD_S2_HOLD_TARGET_PCT    = 90.0f;
-    static constexpr float MC_LOAD_S2_HOLD_BAND_LO_DELTA = 15.0f;   // push_hi = hold_target - delta
-    static constexpr float MC_LOAD_S2_PUSH_START_PCT     = 60.0f;  // start push PWM
+    static constexpr float MC_LOAD_S2_HOLD_BAND_LO_DELTA = 10.0f;   // push_hi = hold_target - delta
+    static constexpr float MC_LOAD_S2_PUSH_START_PCT     = 70.0f;  // start push PWM
     static constexpr float MC_LOAD_S2_PWM_HI             = 530.0f;
     static constexpr float MC_LOAD_S2_PWM_LO             = 1000.0f;
     // ===== ON_USE CONTROL =====
@@ -663,14 +663,7 @@ public:
 
     float caculate(float E, float time_E)
     {
-        static bool integral_enabled = true;
-        
-        if (absf(E) > 25.0f)
-            integral_enabled = false;
-        else if (absf(E) <= 15.0f)
-            integral_enabled = true;
-    
-        I_save += (integral_enabled ? I : 0.0f) * E * time_E;
+        I_save += I * E * time_E;
         
         if (I_save > pid_range)  I_save = pid_range;
         if (I_save < -pid_range) I_save = -pid_range;
@@ -1662,7 +1655,7 @@ public:
                     {
                         constexpr uint64_t SEND_SOFTSTART_MS = 300ull;
                         constexpr float    V0 = 10.0f;
-                        constexpr float    V  = 80.0f;
+                        constexpr float    V  = 70.0f;
 
                         const uint64_t dt = (send_start_ms != 0) ? (now_ms - send_start_ms) : 1000000ull;
 
