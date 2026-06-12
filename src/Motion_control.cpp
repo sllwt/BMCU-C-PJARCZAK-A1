@@ -238,6 +238,22 @@ static float    dm_auto_last_m[4]       = {0,0,0,0};
 static uint64_t dm_loaded_drop_t0_ms[4] = {0ull,0ull,0ull,0ull};
 #endif
 
+static constexpr float    AUTO_UNLOAD_START_PCT      = 80.0f;
+static constexpr float    AUTO_UNLOAD_NEUTRAL_LO_PCT = 45.0f;
+static constexpr float    AUTO_UNLOAD_NEUTRAL_HI_PCT = 55.0f;
+static constexpr float    AUTO_UNLOAD_ABORT_PCT      = 35.0f;
+static constexpr uint64_t AUTO_UNLOAD_ARM_MS         = 1000ull;
+static constexpr uint64_t AUTO_UNLOAD_MAX_MS         = 15000ull;
+static constexpr uint64_t AUTO_UNLOAD_EMPTY_MS       = 1500ull;
+static constexpr float    AUTO_UNLOAD_PWM_PULL       = 850.0f;
+
+static uint8_t  auto_unload_arm[4]          = {0,0,0,0};
+static uint8_t  auto_unload_active[4]       = {0,0,0,0};
+static uint8_t  auto_unload_blocked[4]      = {0,0,0,0};
+static uint64_t auto_unload_arm_t0_ms[4]    = {0ull,0ull,0ull,0ull};
+static uint64_t auto_unload_active_t0_ms[4] = {0ull,0ull,0ull,0ull};
+static uint64_t auto_unload_empty_t0_ms[4]  = {0ull,0ull,0ull,0ull};
+
 bool filament_channel_inserted[4]       = {false, false, false, false}; // czy kanał fizycznie wpięty
 
 static constexpr float MC_PULL_PIDP_PCT = 30.0f;
@@ -2505,9 +2521,130 @@ static void motor_motion_run(int error, uint64_t time_now, uint32_t now_ticks)
             Motion_control_set_PWM(i, 0);
             continue;
         }
+        
+        if (!filament_channel_inserted[i] ||
+            (!auto_unload_active[i] && MOTOR_CONTROL[i].motion != filament_motion_enum::filament_motion_pressure_ctrl_idle))
+        {
+            auto_unload_arm[i]          = 0u;
+            auto_unload_active[i]       = 0u;
+            auto_unload_blocked[i]      = 0u;
+            auto_unload_arm_t0_ms[i]    = 0ull;
+            auto_unload_active_t0_ms[i] = 0ull;
+            auto_unload_empty_t0_ms[i]  = 0ull;
+        }
+        else
+        {
+            const float pct = MC_PULL_pct_f[i];
+            const uint8_t ks = MC_ONLINE_key_stu[i];
 
-        if (have_time_step)
+            if (pct >= AUTO_UNLOAD_START_PCT)
+            {
+                auto_unload_blocked[i] = 0u;
+
+                if (!auto_unload_arm[i] && !auto_unload_active[i])
+                {
+                    auto_unload_arm[i] = 1u;
+                    auto_unload_arm_t0_ms[i] = time_now;
+                }
+            }
+
+            if (auto_unload_arm[i] && !auto_unload_active[i])
+            {
+                const uint64_t dt = time_now - auto_unload_arm_t0_ms[i];
+
+                if ((pct > AUTO_UNLOAD_NEUTRAL_LO_PCT) && (pct < AUTO_UNLOAD_NEUTRAL_HI_PCT))
+                {
+                    if (!auto_unload_blocked[i] && dt <= AUTO_UNLOAD_ARM_MS)
+                    {
+                        auto_unload_active[i]       = 1u;
+                        auto_unload_active_t0_ms[i] = time_now;
+                        auto_unload_empty_t0_ms[i]  = 0ull;
+                        auto_unload_blocked[i]      = 1u;
+                    }
+
+                    auto_unload_arm[i]       = 0u;
+                    auto_unload_arm_t0_ms[i] = 0ull;
+                }
+                else if (dt > AUTO_UNLOAD_ARM_MS)
+                {
+                    auto_unload_arm[i]       = 0u;
+                    auto_unload_arm_t0_ms[i] = 0ull;
+                }
+            }
+
+            if (auto_unload_active[i])
+            {
+                if (pct < AUTO_UNLOAD_ABORT_PCT)
+                {
+                    auto_unload_active[i]       = 0u;
+                    auto_unload_active_t0_ms[i] = 0ull;
+                    auto_unload_empty_t0_ms[i]  = 0ull;
+                    auto_unload_blocked[i]      = 1u;
+                }
+                else if (ks == 1u)
+                {
+                    auto_unload_empty_t0_ms[i] = 0ull;
+
+                    if ((time_now - auto_unload_active_t0_ms[i]) >= AUTO_UNLOAD_MAX_MS)
+                    {
+                        auto_unload_active[i]       = 0u;
+                        auto_unload_active_t0_ms[i] = 0ull;
+                        auto_unload_empty_t0_ms[i]  = 0ull;
+                        auto_unload_blocked[i]      = 1u;
+                    }
+                }
+                else
+                {
+                    if (auto_unload_empty_t0_ms[i] == 0ull)
+                    {
+                        auto_unload_empty_t0_ms[i] = time_now;
+                    }
+                    else if ((time_now - auto_unload_empty_t0_ms[i]) >= AUTO_UNLOAD_EMPTY_MS)
+                    {
+                        auto_unload_active[i]       = 0u;
+                        auto_unload_active_t0_ms[i] = 0ull;
+                        auto_unload_empty_t0_ms[i]  = 0ull;
+                        auto_unload_blocked[i]      = 1u;
+                    }
+                }
+            }
+        }
+
+        const bool manual_empty_pull = false;
+           // filament_channel_inserted[i] &&
+           // (MC_ONLINE_key_stu[i] == 0u) &&
+           // (MC_PULL_pct_f[i] > 80.0f) &&
+           // (auto_unload_active[i] == 0u);
+
+        if (auto_unload_active[i])
+        {
+            float x = MOTOR_CONTROL[i].dir * AUTO_UNLOAD_PWM_PULL;
+            if (x * MOTOR_CONTROL[i].dir < 0.0f) x = 0.0f;
+
+            MOTOR_CONTROL[i].PID_speed.clear();
+            MOTOR_CONTROL[i].PID_pressure.clear();
+            MOTOR_CONTROL[i].pwm_zeroed = (x == 0.0f) ? 1u : 0u;
+            _MOTOR_CONTROL::x_prev[i] = x;
+
+            Motion_control_set_PWM(i, (int)x);
+            MC_STU_RGB_set_latch(i, 0xA0u, 0x2Du, 0xFFu, time_now, 1u);
+        }
+        else if (manual_empty_pull)
+        {
+            float x = MOTOR_CONTROL[i].dir * 700.0f;
+            if (x * MOTOR_CONTROL[i].dir < 0.0f) x = 0.0f;
+
+            MOTOR_CONTROL[i].PID_speed.clear();
+            MOTOR_CONTROL[i].PID_pressure.clear();
+            MOTOR_CONTROL[i].pwm_zeroed = (x == 0.0f) ? 1u : 0u;
+            _MOTOR_CONTROL::x_prev[i] = x;
+
+            Motion_control_set_PWM(i, (int)x);        
+        }
+        else if (have_time_step)
+        {
             MOTOR_CONTROL[i].run(time_E, time_now);
+        }
 
         uint8_t r = 0u, g = 0u, b = 0u;
         bool is_filament_rgb = false;
