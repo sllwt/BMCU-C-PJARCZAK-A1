@@ -680,7 +680,7 @@ public:
     float caculate(float E, float time_E)
     {
         I_save += I * E * time_E;
-        
+
         if (I_save > pid_range)  I_save = pid_range;
         if (I_save < -pid_range) I_save = -pid_range;
 
@@ -2521,7 +2521,7 @@ static void motor_motion_run(int error, uint64_t time_now, uint32_t now_ticks)
             Motion_control_set_PWM(i, 0);
             continue;
         }
-        
+
         if (!filament_channel_inserted[i] ||
             (!auto_unload_active[i] && MOTOR_CONTROL[i].motion != filament_motion_enum::filament_motion_pressure_ctrl_idle))
         {
@@ -2639,7 +2639,7 @@ static void motor_motion_run(int error, uint64_t time_now, uint32_t now_ticks)
             MOTOR_CONTROL[i].pwm_zeroed = (x == 0.0f) ? 1u : 0u;
             _MOTOR_CONTROL::x_prev[i] = x;
 
-            Motion_control_set_PWM(i, (int)x);        
+            Motion_control_set_PWM(i, (int)x);
         }
         else if (have_time_step)
         {
