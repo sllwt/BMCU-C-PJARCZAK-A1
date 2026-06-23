@@ -155,7 +155,7 @@ static constexpr uint8_t kAS5600_OK_RECOVER  = 2;
 static inline bool AS5600_is_good(uint8_t ch) { return g_as5600_good[ch] != 0; }
 
 // ---- liniowe zwalnianie końcówki + minimalny PWM ----
-static constexpr float PULL_V_FAST   = 70.0f;   // mm/s
+static constexpr float PULL_V_FAST   = 80.0f;   // mm/s
 static constexpr float PULL_V_END    = 12.0f;   // mm/s na samym końcu
 static constexpr float PULL_RAMP_M   = 0.015f;  // 15mm strefa hamowania
 static constexpr float PULL_PWM_MIN  = 400.0f;  // "kop" przy pullback
@@ -1671,7 +1671,7 @@ public:
                     {
                         constexpr uint64_t SEND_SOFTSTART_MS = 300ull;
                         constexpr float    V0 = 10.0f;
-                        constexpr float    V  = 70.0f;
+                        constexpr float    V  = 80.0f;
 
                         const uint64_t dt = (send_start_ms != 0) ? (now_ms - send_start_ms) : 1000000ull;
 
