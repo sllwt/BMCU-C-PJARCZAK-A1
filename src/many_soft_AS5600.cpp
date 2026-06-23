@@ -332,7 +332,7 @@ void AS5600_soft_IIC_many::updata_angle()
     {
         if (error[i] == 0)
         {
-            raw_angle[i] = 4095 - ((uint16_t)data[i] & 0x0FFF);
+            raw_angle[i] = data[i];
             online[i] = true;
         }
         else
