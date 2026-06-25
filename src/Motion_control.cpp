@@ -284,8 +284,8 @@ static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
     static constexpr int   MC_LOAD_S1_HARD_HYS       = 2;   // wróć dopiero < (HARD_STOP - HYS)
     // Stage2 (hold_load)
     static constexpr float MC_LOAD_S2_HOLD_TARGET_PCT    = 90.0f;
-    static constexpr float MC_LOAD_S2_HOLD_BAND_LO_DELTA = 10.0f;   // push_hi = hold_target - delta
-    static constexpr float MC_LOAD_S2_PUSH_START_PCT     = 70.0f;  // start push PWM
+    static constexpr float MC_LOAD_S2_HOLD_BAND_LO_DELTA = 15.0f;   // push_hi = hold_target - delta
+    static constexpr float MC_LOAD_S2_PUSH_START_PCT     = 60.0f;  // start push PWM
     static constexpr float MC_LOAD_S2_PWM_HI             = 530.0f;
     static constexpr float MC_LOAD_S2_PWM_LO             = 1000.0f;
     // ===== ON_USE CONTROL =====
