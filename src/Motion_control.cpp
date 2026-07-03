@@ -279,8 +279,8 @@ static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
     static constexpr float MC_ON_USE_BAND_HI_PCT   = 65.0f;
 #else        // A1
     // Stage1
-    static constexpr int   MC_LOAD_S1_FAST_PCT       = 85;
-    static constexpr int   MC_LOAD_S1_HARD_STOP_PCT  = 95;  // bezpiecznik
+    static constexpr int   MC_LOAD_S1_FAST_PCT       = 82;
+    static constexpr int   MC_LOAD_S1_HARD_STOP_PCT  = 92;  // bezpiecznik
     static constexpr int   MC_LOAD_S1_HARD_HYS       = 2;   // wróć dopiero < (HARD_STOP - HYS)
     // Stage2 (hold_load)
     static constexpr float MC_LOAD_S2_HOLD_TARGET_PCT    = 90.0f;
