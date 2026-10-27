@@ -258,7 +258,7 @@ bool filament_channel_inserted[4]       = {false, false, false, false}; // czy k
 
 static constexpr float MC_PULL_PIDP_PCT = 30.0f;
 
-static constexpr int MC_PULL_DEADBAND_PCT_LOW  = 40;
+static constexpr int MC_PULL_DEADBAND_PCT_LOW  = 30;
 static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
 
 // ================ LOAD CONTROL ======================
