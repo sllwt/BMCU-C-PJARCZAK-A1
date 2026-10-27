@@ -2,6 +2,16 @@
 #include "hal/time_hw.h"
 #include "hal/irq_wch.h"
 
+// 全局 LED 亮度：0 = 全灭，255 = 原亮度
+static constexpr uint8_t kLedBrightness = 64; // 约 25%
+
+static inline uint8_t led_scale(uint8_t value)
+{
+    return (uint8_t)(
+        ((uint16_t)value * (uint16_t)kLedBrightness + 127u) / 255u
+    );
+}
+
 // WS2812B timing (datasheet):
 //  - TH+TL = 1.25us ±600ns
 //  - T0H   = 0.4us  ±150ns
@@ -143,7 +153,14 @@ void WS2812_class::set_RGB(uint8_t R, uint8_t G, uint8_t B, uint8_t index)
 {
     if (index >= num) return;
 
-    const uint32_t packed = ((uint32_t)G << 16) | ((uint32_t)R << 8) | (uint32_t)B;
+    R = led_scale(R);
+    G = led_scale(G);
+    B = led_scale(B);
+
+    const uint32_t packed = ((uint32_t)G << 16) |
+                            ((uint32_t)R << 8) |
+                            (uint32_t)B;
+
     if (last_grb[index] == packed) return;
 
     last_grb[index] = packed;
