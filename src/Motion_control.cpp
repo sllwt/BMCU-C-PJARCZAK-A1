@@ -250,6 +250,7 @@ static constexpr float    AUTO_UNLOAD_PWM_PULL       = 850.0f;
 static uint8_t  auto_unload_arm[4]          = {0,0,0,0};
 static uint8_t  auto_unload_active[4]       = {0,0,0,0};
 static uint8_t  auto_unload_blocked[4]      = {0,0,0,0};
+static uint8_t  auto_unload_exit_hold[4]    = {0,0,0,0};  // 新增：退出内侧微动后保持停止，防止压力控制立即重启电机
 static uint64_t auto_unload_arm_t0_ms[4]    = {0ull,0ull,0ull,0ull};
 static uint64_t auto_unload_active_t0_ms[4] = {0ull,0ull,0ull,0ull};
 static uint64_t auto_unload_empty_t0_ms[4]  = {0ull,0ull,0ull,0ull};
@@ -2515,6 +2516,10 @@ static void motor_motion_run(int error, uint64_t time_now, uint32_t now_ticks)
 
     for (uint8_t i = 0; i < kChCount; i++)
     {
+        if (!filament_channel_inserted[i])
+    {
+        auto_unload_exit_hold[i] = 0u;   
+    }                                    // 新增：通道模块没有接入时清除停止锁
         if (!AS5600_is_good(i))
         {
             MOTOR_CONTROL[i].set_motion(filament_motion_enum::filament_motion_stop, 100, time_now);
@@ -2537,7 +2542,14 @@ static void motor_motion_run(int error, uint64_t time_now, uint32_t now_ticks)
             const float pct = MC_PULL_pct_f[i];
             const uint8_t ks = MC_ONLINE_key_stu[i];
 
-            if (pct >= AUTO_UNLOAD_START_PCT)
+            if (auto_unload_exit_hold[i] &&
+                ((ks == 0u) || (ks == 1u)))
+            {
+                auto_unload_exit_hold[i] = 0u;
+            }                                        // 新增：完全退出或重新双压时解除停止锁
+
+            if ((pct >= AUTO_UNLOAD_START_PCT) &&
+                (auto_unload_exit_hold[i] == 0u))    
             {
                 auto_unload_blocked[i] = 0u;
 
@@ -2581,6 +2593,18 @@ static void motor_motion_run(int error, uint64_t time_now, uint32_t now_ticks)
                     auto_unload_empty_t0_ms[i]  = 0ull;
                     auto_unload_blocked[i]      = 1u;
                 }
+
+                    else if (ks == 2u)
+                    {
+                                               // 新增：内外双压 -> 仅外侧压
+                                              // 耗材已退出内侧微动，立即停止自动退料
+                        auto_unload_active[i]       = 0u;
+                        auto_unload_active_t0_ms[i] = 0ull;
+                        auto_unload_empty_t0_ms[i]  = 0ull;
+                        auto_unload_blocked[i]      = 1u;
+                        auto_unload_exit_hold[i]    = 1u;
+                    }
+                        
                 else if (ks == 1u)
                 {
                     auto_unload_empty_t0_ms[i] = 0ull;
@@ -2615,6 +2639,16 @@ static void motor_motion_run(int error, uint64_t time_now, uint32_t now_ticks)
            // (MC_ONLINE_key_stu[i] == 0u) &&
            // (MC_PULL_pct_f[i] > 80.0f) &&
            // (auto_unload_active[i] == 0u);
+
+        if (auto_unload_exit_hold[i])
+        {
+            MOTOR_CONTROL[i].PID_speed.clear();
+            MOTOR_CONTROL[i].PID_pressure.clear();
+            MOTOR_CONTROL[i].pwm_zeroed = 1u;
+            _MOTOR_CONTROL::x_prev[i] = 0.0f;
+
+            Motion_control_set_PWM(i, 0);
+        }
 
         if (auto_unload_active[i])
         {
