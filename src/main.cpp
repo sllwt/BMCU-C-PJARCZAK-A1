@@ -10,6 +10,7 @@
 #include "ADC_DMA.h"
 #include "Debug_log.h"
 #include "auth_proxy.h"
+#include "hal/time_hw.h"
 #include <string.h>
 
 WS2812_class SYS_RGB;
@@ -242,11 +243,13 @@ int main(void)
             bus_port_to_host.send_package();
 
         static int error = 0;
+        static uint32_t bus_error_since = 0u;
 
         if ((ahub_stu != ahubus_package_type::none) || (bambubus_stu != bambubus_package_type::none))
         {
             if ((ahub_stu != ahubus_package_type::error) || (bambubus_stu != bambubus_package_type::error))
             {
+                bus_error_since = 0u;
                 error = 0;
 
                 if (bambubus_stu == bambubus_package_type::heartbeat)
@@ -263,8 +266,16 @@ int main(void)
             }
             else
             {
-                error = -1;
-                SYS_RGB.set_RGB(0x10, 0x00, 0x00, 0);
+                const uint32_t now = time_ticks32();
+                if (bus_error_since == 0u)
+                    bus_error_since = now;
+
+                if (time_diff32(now, bus_error_since) >=
+                    (int32_t)ms_to_ticks32(BMCU_BUS_ERROR_DEBOUNCE_MS))
+                {
+                    error = -1;
+                    SYS_RGB.set_RGB(0x10, 0x00, 0x00, 0);
+                }
             }
         }
 

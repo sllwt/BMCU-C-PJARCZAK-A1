@@ -13,6 +13,10 @@ enum class _bus_data_type : uint8_t
 #define BMCU_BUS_HEARTBEAT_TIMEOUT_MS 1000u
 #endif
 
+#ifndef BMCU_BUS_ERROR_DEBOUNCE_MS
+#define BMCU_BUS_ERROR_DEBOUNCE_MS 0u
+#endif
+
 typedef uint8_t (*bus_frame_capture_filter_t)(const uint8_t *data, uint16_t length);
 typedef void (*bus_frame_capture_sink_t)(const uint8_t *data, uint16_t length);
 
