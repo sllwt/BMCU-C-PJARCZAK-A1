@@ -13,7 +13,8 @@ static uint32_t bambubus_heartbeat_deadline = 0u;
 
 void bambubus_heartbeat_seen_fast(void)
 {
-    bambubus_heartbeat_deadline = time_ticks32() + ms_to_ticks32(1000u);
+    bambubus_heartbeat_deadline =
+        time_ticks32() + ms_to_ticks32(BMCU_BUS_HEARTBEAT_TIMEOUT_MS);
 }
 
 bool package_check_crc16(uint8_t *data, int data_length)
@@ -1076,20 +1077,19 @@ void get_package_long_packge_serial_number(unsigned char *buf, int length)
 //0x50 // 80
 //0x5A // 90
 #if BMCU_AMS2_PRO_IDENTITY
-unsigned char long_packge_version_version_and_name[] = {
+/*
+ * Captured official N3F05 reply:
+ *   4-byte version + 32-byte model name + 21 bytes of AMS2 fields.
+ * The final byte is replaced at runtime with the configured AMS index.
+ */
+unsigned char long_packge_version_version_and_name[57] = {
     0x00, 0x00, 0x00, 0x5A, // 90.00.00.00, little-endian on the wire
     0x4E, 0x33, 0x46, 0x30, 0x35, // N3F05
-    0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00
 };
 #else
-unsigned char long_packge_version_version_and_name[] = {
+unsigned char long_packge_version_version_and_name[21] = {
     0x00, 0x00, 0x32, 0x0A, // 10.50.00.00, little-endian on the wire
     0x41, 0x4D, 0x53, 0x30, 0x38, // AMS08
-    0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00
 };
 #endif
 
