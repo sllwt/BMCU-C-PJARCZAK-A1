@@ -2,6 +2,21 @@
 
 This BMCU firmware has been tested and verified with the latest Bambu Lab A1 firmware.
 
+## Authentication relay experiment
+
+This copy includes an opt-in `a1_auth_proxy` PlatformIO environment for
+testing a shared-bus `0x040E` challenge relay on A1 firmware affected by the
+device-unbound authentication behavior.
+
+The existing firmware environments remain unchanged. See
+[AUTH_PROXY.md](AUTH_PROXY.md) for wiring assumptions, build settings, and
+limitations.
+
+Two experimental environments are provided:
+
+- `a1_auth_proxy`: `AMS08` with version `10.50.00.00`
+- `a1_auth_proxy_ams2`: `N3F05` with version `90.00.00.00`
+
 IMPORTANT:
 The printer must be configured as AMS, not AMS Lite.
 Using AMS Lite will cause incompatibility issues.
