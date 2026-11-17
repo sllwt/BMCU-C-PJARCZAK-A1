@@ -12,10 +12,17 @@ The existing firmware environments remain unchanged. See
 [AUTH_PROXY.md](AUTH_PROXY.md) for wiring assumptions, build settings, and
 limitations.
 
-Two experimental environments are provided:
+Two local PlatformIO environments are provided:
 
-- `a1_auth_proxy`: `AMS08` with version `10.50.00.00`
-- `a1_auth_proxy_ams2`: `N3F05` with version `90.00.00.00`
+- `a1_auth_proxy`: `AMS08` with version `01.00.06.87`
+- `a1_auth_proxy_ams2`: `N3F05` with version `04.00.21.87`
+
+Push and pull-request builds compile two AMS2 test images:
+
+- `A_identity_only_AMS2_04.00.21.87.bin`: identity spoof only
+- `B_with_auth_proxy_AMS2_04.00.21.87.bin`: identity spoof and relay
+
+Use manual workflow dispatch when the full release matrix is needed.
 
 IMPORTANT:
 The printer must be configured as AMS, not AMS Lite.

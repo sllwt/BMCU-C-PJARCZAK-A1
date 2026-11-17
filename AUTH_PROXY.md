@@ -33,9 +33,8 @@ Challenge selector byte:    payload offset 4
 Response timeout:           30 ms
 Direct-response grace:      5 ms
 Retry count after timeout:  1
-BMCU AMS identity:          AMS08, 10.50.00.00
+BMCU AMS identity:          AMS08, 01.00.06.87
 Bus heartbeat tolerance:    1000 ms
-Bus error confirmation:     750 ms
 ```
 
 Change these values to match the actual test setup:
@@ -74,31 +73,62 @@ identical to `a1_auth_proxy` except the `0x0103` identity becomes:
 
 ```text
 device name: N3F05
-version:     90.00.00.00
-wire bytes:  00 00 00 5A
+version:     04.00.21.87
+wire bytes:  87 15 00 04
 reply size:  57 bytes
 ```
 
-`a1_auth_proxy_ams2_recovery` uses the same 57-byte N3F05 reply and disables
-the direct-response grace. Use it if the grace-period timing itself causes a
-regression.
+### Authentication A/B verification
 
-The environments intentionally remain separate so timing changes can be
-isolated from the model/version compatibility branch.
+GitHub Actions publishes two firmware images:
+
+```text
+A_identity_only_AMS2_04.00.21.87.bin
+    N3F05 + 04.00.21.87
+    authentication proxy disabled
+
+B_with_auth_proxy_AMS2_04.00.21.87.bin
+    N3F05 + 04.00.21.87
+    authentication proxy enabled
+```
+
+Use the same AMS index, official AMS position, filament state, and power cycle
+for both tests.
+
+Interpretation:
+
+```text
+A clears the warning, but load/print or second print later fails
+    -> model/version spoof only hides the prompt; proxy is doing real work
+
+A and B behave identically across reboot and repeated prints
+    -> the relay is not required on that firmware, or official AMS auth is
+       already accepted globally
+
+A clears the warning and B restores immediate recognition/runtime
+    -> proxy works but needs further timing fixes
+
+Both still show the mismatch warning
+    -> the warning is not being cleared by the AMS2 identity alone
+```
+
+For definitive proof, capture Bambu Bus during both boot sequences and record
+whether the BMCU device index receives its own `0x040D/0x040E` transaction and
+which device answers it.
 
 The existing release matrix is unchanged. A separate GitHub Actions job is
-provided for the two experimental builds.
+provided for the AMS2 Pro authentication build.
 
 ## GitHub Actions
 
 The workflow in `.github/workflows/build.yml` includes a separate
 `build_auth_proxy` job. After pushing a branch or opening a pull request it
-builds both environments and publishes:
+builds and publishes:
 
 ```text
 auth-proxy-firmwares-<commit>/
-  a1_auth_proxy_AMS08_10.50.00.00.bin
-  a1_auth_proxy_AMS2Pro_90.00.00.00.bin
+  A_identity_only_AMS2_04.00.21.87.bin
+  B_with_auth_proxy_AMS2_04.00.21.87.bin
 ```
 
 Open the workflow run and download the `auth-proxy-firmwares-<commit>`
@@ -140,10 +170,10 @@ invalid_frames = 0
 - This implementation targets the observed `0x040E` challenge transaction.
   It does not forge or copy a private key.
 - Version/model identity and authentication are separate layers. The
-  `AMS08 + 10.50.00.00` identity may trigger a compatibility warning even when
-  the random challenge succeeds; test `a1_auth_proxy_ams2` to isolate it.
-- `a1_auth_proxy_ams2` is the default AMS2 build. The `_recovery` variant
-  changes only the direct-response grace timing.
+  `AMS08 + 01.00.06.87` identity may trigger a compatibility warning even
+  when the random challenge succeeds; test `a1_auth_proxy_ams2` to isolate it.
+- `a1_auth_proxy_ams2` is the only automatic Actions build. It uses the
+  recognized 57-byte reply, 5 ms response grace, and 1000 ms heartbeat limit.
 - `0x040D` certificate behavior is left untouched. If a tested firmware
   requires certificate relay as well, it must be captured and added as a
   separate transaction stage.
@@ -159,9 +189,6 @@ invalid_frames = 0
 - Do not increase heartbeat tolerance to 2500 ms on this firmware path:
   hardware testing showed that the BMCU then stops enumerating. Experimental
   builds therefore retain the original 1000 ms value.
-- Red status flashes are filtered separately. The LED and motion error state
-  are only asserted after the bus error persists for 750 ms, so a single late
-  heartbeat does not produce a transient red flash.
 - If the printer later rejects the official AMS source identity, a two-port
   isolated bridge is required.
 - Do not hot-plug AMS/BMCU hardware while the printer is powered.
