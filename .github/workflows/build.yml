@@ -74,19 +74,19 @@ jobs:
       - name: 安装PlatformIO
         run: pip install platformio
 
-      - name: 编译AMS08认证代理
-        run: pio run -e a1_auth_proxy
-
       - name: 编译AMS2 Pro认证代理
         run: pio run -e a1_auth_proxy_ams2
+
+      - name: 编译仅AMS2身份对照组
+        run: pio run -e a1_ams2_identity_only
 
       - name: 整理固件
         run: |
           mkdir -p auth-proxy-firmwares
-          cp .pio/build/a1_auth_proxy/firmware.bin \
-             auth-proxy-firmwares/a1_auth_proxy_AMS08_10.50.00.00.bin
           cp .pio/build/a1_auth_proxy_ams2/firmware.bin \
-             auth-proxy-firmwares/a1_auth_proxy_AMS2Pro_90.00.00.00.bin
+             auth-proxy-firmwares/B_with_auth_proxy_AMS2_04.00.21.87.bin
+          cp .pio/build/a1_ams2_identity_only/firmware.bin \
+             auth-proxy-firmwares/A_identity_only_AMS2_04.00.21.87.bin
 
       - name: 上传认证代理固件
         uses: actions/upload-artifact@v4
