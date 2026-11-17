@@ -47,6 +47,15 @@
 #define BMCU_AUTH_PROXY_TIMEOUT_MS 30
 #endif
 
+/*
+ * Give an official AMS a short chance to answer the original challenge before
+ * BMCU retransmits it. This avoids duplicate responses and needless RS485
+ * contention when the AMS already accepted the printer's frame.
+ */
+#ifndef BMCU_AUTH_PROXY_DIRECT_RESPONSE_GRACE_MS
+#define BMCU_AUTH_PROXY_DIRECT_RESPONSE_GRACE_MS 5
+#endif
+
 #ifndef BMCU_AUTH_PROXY_RETRY_COUNT
 #define BMCU_AUTH_PROXY_RETRY_COUNT 1
 #endif

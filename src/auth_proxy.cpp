@@ -60,6 +60,7 @@ static uint8_t retries_left = 0u;
 static uint8_t response_mask = 0u;
 static uint32_t response_deadline = 0u;
 static uint32_t send_deadline = 0u;
+static uint32_t send_not_before = 0u;
 static uint16_t expected_packet_number = 0u;
 static uint16_t expected_response_target = 0u;
 static uint16_t expected_response_source = 0u;
@@ -159,6 +160,7 @@ static void release_transaction(void)
     response_mask = 0u;
     response_deadline = 0u;
     send_deadline = 0u;
+    send_not_before = 0u;
     expected_packet_number = 0u;
     expected_response_target = 0u;
     expected_response_source = 0u;
@@ -205,7 +207,10 @@ static void begin_transaction(const uint8_t *frame, uint16_t length)
     expected_response_source = read_u16(forward_frame + kTargetAddressOffset);
     state = ProxyState::send_forward;
     tx_locked = 1u;
-    send_deadline = time_ticks32() + ms_to_ticks32(BMCU_AUTH_PROXY_TIMEOUT_MS);
+    const uint32_t now = time_ticks32();
+    send_not_before =
+        now + ms_to_ticks32(BMCU_AUTH_PROXY_DIRECT_RESPONSE_GRACE_MS);
+    send_deadline = now + ms_to_ticks32(BMCU_AUTH_PROXY_TIMEOUT_MS);
 }
 
 static void note_response(const uint8_t *frame, uint16_t length)
@@ -311,7 +316,8 @@ void auth_proxy_run(void)
         }
     }
 
-    if ((state == ProxyState::send_forward) && bus_port_to_host.idle)
+    if ((state == ProxyState::send_forward) && bus_port_to_host.idle &&
+        time_reached32(now, send_not_before))
     {
         bus_port_to_host.send_package(forward_frame, forward_length);
         stats.forwards_sent++;
