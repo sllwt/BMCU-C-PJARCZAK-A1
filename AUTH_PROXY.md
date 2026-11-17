@@ -34,6 +34,7 @@ Response timeout:           30 ms
 Direct-response grace:      5 ms
 Retry count after timeout:  1
 BMCU AMS identity:          AMS08, 10.50.00.00
+Bus heartbeat tolerance:    2500 ms
 ```
 
 Change these values to match the actual test setup:
@@ -148,6 +149,9 @@ invalid_frames = 0
 - A 5 ms grace period lets the official AMS answer the original challenge
   before BMCU retransmits it. This reduces duplicate signatures and brief
   heartbeat contention on the shared bus.
+- The experimental builds use a 2500 ms heartbeat tolerance instead of the
+  original 1000 ms. A printer heartbeat arriving slightly late no longer
+  produces a transient red status flash or a false bus-error state.
 - If the printer later rejects the official AMS source identity, a two-port
   isolated bridge is required.
 - Do not hot-plug AMS/BMCU hardware while the printer is powered.
