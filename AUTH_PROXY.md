@@ -34,7 +34,8 @@ Response timeout:           30 ms
 Direct-response grace:      5 ms
 Retry count after timeout:  1
 BMCU AMS identity:          AMS08, 10.50.00.00
-Bus heartbeat tolerance:    2500 ms
+Bus heartbeat tolerance:    1000 ms
+Bus error confirmation:     750 ms
 ```
 
 Change these values to match the actual test setup:
@@ -68,18 +69,22 @@ For the AMS 2 Pro identity, use:
 pio run -e a1_auth_proxy_ams2
 ```
 
-That environment is identical to `a1_auth_proxy`, except the `0x0103`
-identity response becomes:
+`a1_auth_proxy_ams2` uses the recognized 57-byte N3F05 reply. It is
+identical to `a1_auth_proxy` except the `0x0103` identity becomes:
 
 ```text
 device name: N3F05
 version:     90.00.00.00
 wire bytes:  00 00 00 5A
-reply size:  57 bytes, matching the captured official AMS2 reply
+reply size:  57 bytes
 ```
 
-The two environments intentionally remain separate so the auth result can be
-compared without conflating it with the model/version compatibility branch.
+`a1_auth_proxy_ams2_recovery` uses the same 57-byte N3F05 reply and disables
+the direct-response grace. Use it if the grace-period timing itself causes a
+regression.
+
+The environments intentionally remain separate so timing changes can be
+isolated from the model/version compatibility branch.
 
 The existing release matrix is unchanged. A separate GitHub Actions job is
 provided for the two experimental builds.
@@ -137,6 +142,8 @@ invalid_frames = 0
 - Version/model identity and authentication are separate layers. The
   `AMS08 + 10.50.00.00` identity may trigger a compatibility warning even when
   the random challenge succeeds; test `a1_auth_proxy_ams2` to isolate it.
+- `a1_auth_proxy_ams2` is the default AMS2 build. The `_recovery` variant
+  changes only the direct-response grace timing.
 - `0x040D` certificate behavior is left untouched. If a tested firmware
   requires certificate relay as well, it must be captured and added as a
   separate transaction stage.
@@ -149,9 +156,12 @@ invalid_frames = 0
 - A 5 ms grace period lets the official AMS answer the original challenge
   before BMCU retransmits it. This reduces duplicate signatures and brief
   heartbeat contention on the shared bus.
-- The experimental builds use a 2500 ms heartbeat tolerance instead of the
-  original 1000 ms. A printer heartbeat arriving slightly late no longer
-  produces a transient red status flash or a false bus-error state.
+- Do not increase heartbeat tolerance to 2500 ms on this firmware path:
+  hardware testing showed that the BMCU then stops enumerating. Experimental
+  builds therefore retain the original 1000 ms value.
+- Red status flashes are filtered separately. The LED and motion error state
+  are only asserted after the bus error persists for 750 ms, so a single late
+  heartbeat does not produce a transient red flash.
 - If the printer later rejects the official AMS source identity, a two-port
   isolated bridge is required.
 - Do not hot-plug AMS/BMCU hardware while the printer is powered.
