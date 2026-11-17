@@ -31,6 +31,7 @@ Official AMS index:         0
 Rewrite challenge selector: enabled
 Challenge selector byte:    payload offset 4
 Response timeout:           30 ms
+Direct-response grace:      5 ms
 Retry count after timeout:  1
 BMCU AMS identity:          AMS08, 10.50.00.00
 ```
@@ -73,6 +74,7 @@ identity response becomes:
 device name: N3F05
 version:     90.00.00.00
 wire bytes:  00 00 00 5A
+reply size:  57 bytes, matching the captured official AMS2 reply
 ```
 
 The two environments intentionally remain separate so the auth result can be
@@ -95,6 +97,11 @@ auth-proxy-firmwares-<commit>/
 
 Open the workflow run and download the `auth-proxy-firmwares-<commit>`
 artifact from the Actions page.
+
+The full release matrix is intentionally manual. Open
+`Actions > 自动编译固件 > Run workflow` to run the `手动编译全部固件` job.
+This prevents the long release job from delaying or marking authentication
+relay test runs as failed.
 
 ## Expected counters
 
@@ -138,6 +145,9 @@ invalid_frames = 0
 - The single RS485 port cannot hide the official AMS's direct response. This
   design assumes `1.05-1.07` accepts a valid response without binding it to
   the challenged device.
+- A 5 ms grace period lets the official AMS answer the original challenge
+  before BMCU retransmits it. This reduces duplicate signatures and brief
+  heartbeat contention on the shared bus.
 - If the printer later rejects the official AMS source identity, a two-port
   isolated bridge is required.
 - Do not hot-plug AMS/BMCU hardware while the printer is powered.
