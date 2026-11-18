@@ -1,10 +1,10 @@
-#name: 自动编译固件
+name: 自动编译固件
 
 # 普通 push/PR 只构建认证代理测试固件。
 # 完整发布矩阵通过 Actions 页面手动触发。
-#on: [push, pull_request, workflow_dispatch]
+on: [push, pull_request, workflow_dispatch]
 
-#jobs:
+jobs:
   build:                    # 注意这里需要缩进2空格
     name: 手动编译全部固件
     runs-on: ubuntu-latest
@@ -74,19 +74,19 @@
       - name: 安装PlatformIO
         run: pip install platformio
 
-      - name: 编译AMS2 Pro认证代理
-        run: pio run -e a1_auth_proxy_ams2
+      - name: 编译AMS2 Pro + AMS HT认证代理
+        run: pio run -e a1_auth_proxy_ams2_ht
 
-      - name: 编译仅AMS2身份对照组
-        run: pio run -e a1_ams2_identity_only
+      - name: 编译AMS2 Pro原数组版本
+        run: pio run -e a1_auth_proxy_ams2_ht_original_array
 
       - name: 整理固件
         run: |
           mkdir -p auth-proxy-firmwares
-          cp .pio/build/a1_auth_proxy_ams2/firmware.bin \
-             auth-proxy-firmwares/B_with_auth_proxy_AMS2_04.00.21.87.bin
-          cp .pio/build/a1_ams2_identity_only/firmware.bin \
-             auth-proxy-firmwares/A_identity_only_AMS2_04.00.21.87.bin
+          cp .pio/build/a1_auth_proxy_ams2_ht/firmware.bin \
+             auth-proxy-firmwares/PROXY_AMS0_N3F05_90.00.00.00_HT_FULL57.bin
+          cp .pio/build/a1_auth_proxy_ams2_ht_original_array/firmware.bin \
+             auth-proxy-firmwares/PROXY_AMS0_N3F05_90.00.00.00_HT_ORIGINAL21.bin
 
       - name: 上传认证代理固件
         uses: actions/upload-artifact@v4
