@@ -73,8 +73,8 @@ identical to `a1_auth_proxy` except the `0x0103` identity becomes:
 
 ```text
 device name: N3F05
-version:     04.00.21.87
-wire bytes:  87 15 00 04
+version:     90.00.00.00
+wire bytes:  00 00 00 5A
 reply size:  57 bytes
 ```
 
@@ -83,13 +83,17 @@ reply size:  57 bytes
 GitHub Actions publishes two firmware images:
 
 ```text
-A_identity_only_AMS2_04.00.21.87.bin
-    N3F05 + 04.00.21.87
-    authentication proxy disabled
+PROXY_AMS0_N3F05_90.00.00.00_HT_FULL57.bin
+    N3F05 + 90.00.00.00
+    AMS index 0
+    authentication proxy enabled, signing target address 0x1800
+    57-byte AMS2 identity response
 
-B_with_auth_proxy_AMS2_04.00.21.87.bin
-    N3F05 + 04.00.21.87
-    authentication proxy enabled
+PROXY_AMS0_N3F05_90.00.00.00_HT_ORIGINAL21.bin
+    N3F05 + 90.00.00.00
+    AMS index 0
+    authentication proxy enabled, signing target address 0x1800
+    original 21-byte AMS2PRO identity array
 ```
 
 Use the same AMS index, official AMS position, filament state, and power cycle
@@ -127,8 +131,8 @@ builds and publishes:
 
 ```text
 auth-proxy-firmwares-<commit>/
-  A_identity_only_AMS2_04.00.21.87.bin
-  B_with_auth_proxy_AMS2_04.00.21.87.bin
+  PROXY_AMS0_N3F05_90.00.00.00_HT_FULL57.bin
+  PROXY_AMS0_N3F05_90.00.00.00_HT_ORIGINAL21.bin
 ```
 
 Open the workflow run and download the `auth-proxy-firmwares-<commit>`
@@ -183,6 +187,12 @@ invalid_frames = 0
 - The single RS485 port cannot hide the official AMS's direct response. This
   design assumes `1.05-1.07` accepts a valid response without binding it to
   the challenged device.
+- AMS HT uses the `0x1800` bus address. Use the `_HT` authentication-proxy
+  build when AMS HT is the only official signing device. The regular proxy
+  build targets normal AMS address `0x0700`.
+- The released proxy image uses AMS index 0 because the stock BMCU is assigned
+  AMS index 1. One BMCU proxy does not automatically authenticate another BMCU
+  as a separate AMS entry.
 - A 5 ms grace period lets the official AMS answer the original challenge
   before BMCU retransmits it. This reduces duplicate signatures and brief
   heartbeat contention on the shared bus.

@@ -15,12 +15,18 @@ limitations.
 Two local PlatformIO environments are provided:
 
 - `a1_auth_proxy`: `AMS08` with version `01.00.06.87`
-- `a1_auth_proxy_ams2`: `N3F05` with version `04.00.21.87`
+- `a1_auth_proxy_ams2`: `N3F05` with version `90.00.00.00`
 
-Push and pull-request builds compile two AMS2 test images:
+Push and pull-request builds compile one proxy image:
 
-- `A_identity_only_AMS2_04.00.21.87.bin`: identity spoof only
-- `B_with_auth_proxy_AMS2_04.00.21.87.bin`: identity spoof and relay
+```text
+PROXY_AMS0_N3F05_90.00.00.00_HT_FULL57.bin
+PROXY_AMS0_N3F05_90.00.00.00_HT_ORIGINAL21.bin
+```
+
+Both use AMS 0, `N3F05 + 90.00.00.00`, and AMS HT at `0x1800`. The only
+difference is the AMS2 identity-array length: 57 bytes or the original 21-byte
+array.
 
 Use manual workflow dispatch when the full release matrix is needed.
 
