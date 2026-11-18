@@ -1,6 +1,14 @@
 #pragma once
 #include <stdint.h>
 
+#ifndef BMCU_AMS2_PRO_IDENTITY
+#define BMCU_AMS2_PRO_IDENTITY 1
+#endif
+
+#ifndef BMCU_AMS2_FULL_IDENTITY
+#define BMCU_AMS2_FULL_IDENTITY 0
+#endif
+
 enum class bambubus_package_type
 {
     error = -1,
@@ -16,6 +24,8 @@ enum class bambubus_package_type
     set_filament_info_type2,
     version,
     serial_number,
+    authentication_cert,
+    authentication_challenge,
     heartbeat,
     ETC,
 

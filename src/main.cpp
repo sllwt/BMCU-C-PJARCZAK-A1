@@ -9,6 +9,7 @@
 #include "bambu_bus_ams.h"
 #include "ADC_DMA.h"
 #include "Debug_log.h"
+#include "auth_proxy.h"
 #include <string.h>
 
 WS2812_class SYS_RGB;
@@ -221,14 +222,24 @@ int main(void)
     Motion_control_init();
     bambubus_init();
     bus_init();
+    auth_proxy_init();
 
     DEBUG("START\n");
 
     while (1)
     {
+        auth_proxy_run();
+
         const ahubus_package_type   ahub_stu     = ahubus_run();
         const bambubus_package_type bambubus_stu = bambubus_run();
-        bus_port_to_host.send_package();
+
+        /*
+         * Authentication relay frames have priority. Ordinary responses are
+         * held until the AMS response chunks have been observed or the proxy
+         * transaction times out.
+         */
+        if (!auth_proxy_tx_locked())
+            bus_port_to_host.send_package();
 
         static int error = 0;
 

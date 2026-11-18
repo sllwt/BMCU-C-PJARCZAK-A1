@@ -13,7 +13,8 @@ static uint32_t bambubus_heartbeat_deadline = 0u;
 
 void bambubus_heartbeat_seen_fast(void)
 {
-    bambubus_heartbeat_deadline = time_ticks32() + ms_to_ticks32(1000u);
+    bambubus_heartbeat_deadline =
+        time_ticks32() + ms_to_ticks32(BMCU_BUS_HEARTBEAT_TIMEOUT_MS);
 }
 
 bool package_check_crc16(uint8_t *data, int data_length)
@@ -151,6 +152,10 @@ bambubus_package_type get_packge_type(unsigned char *buf, int length)
             return bambubus_package_type::version;
         case 0x402:
             return bambubus_package_type::serial_number;
+        case 0x40D:
+            return bambubus_package_type::authentication_cert;
+        case 0x40E:
+            return bambubus_package_type::authentication_challenge;
         default:
             return bambubus_package_type::ETC;
         }
@@ -1071,13 +1076,29 @@ void get_package_long_packge_serial_number(unsigned char *buf, int length)
 //0x46 // 70
 //0x50 // 80
 //0x5A // 90
-unsigned char long_packge_version_version_and_name_AMS08[] = {0x00, 0x00, 0x32, 0x0A , // verison number
-                                                              0x41, 0x4D, 0x53, 0x30, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-//unsigned char long_packge_version_version_and_name_AMS2PRO[] = {
-//    0x00, 0x00, 0x00, 0x5A,
-//    0x4E, 0x33, 0x46, 0x30, 0x35, 0x00, 0x00, 0x00,
-//    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-//};
+#if BMCU_AMS2_PRO_IDENTITY
+/*
+ * Both reply sizes have been recognized by the A1. The full 57-byte reply
+ * matches the captured official AMS2 length, while the 21-byte form is a
+ * compatibility fallback.
+ */
+#if BMCU_AMS2_FULL_IDENTITY
+unsigned char long_packge_version_version_and_name[57] = {
+    0x00, 0x00, 0x00, 0x5A, // 90.00.00.00, little-endian on the wire
+    0x4E, 0x33, 0x46, 0x30, 0x35, // N3F05
+};
+#else
+unsigned char long_packge_version_version_and_name[21] = {
+    0x00, 0x00, 0x00, 0x5A, // 90.00.00.00, little-endian on the wire
+    0x4E, 0x33, 0x46, 0x30, 0x35, // N3F05
+};
+#endif
+#else
+unsigned char long_packge_version_version_and_name[21] = {
+    0x57, 0x06, 0x00, 0x01, // 01.00.06.87, little-endian on the wire
+    0x41, 0x4D, 0x53, 0x30, 0x38, // AMS08
+};
+#endif
 
 
 void get_package_long_packge_version(unsigned char *buf, int length)
@@ -1091,11 +1112,11 @@ void get_package_long_packge_version(unsigned char *buf, int length)
     if (ams_num != fixed_ams_num || ams[bambubus_ams_map[fixed_ams_num]].online != true)
         return;
 
-    long_packge_version_version_and_name_AMS08[sizeof(long_packge_version_version_and_name_AMS08) - 1u] = fixed_ams_num;
+    long_packge_version_version_and_name[sizeof(long_packge_version_version_and_name) - 1u] = fixed_ams_num;
 
     bambubus_long_packge_data data;
-    data.datas = long_packge_version_version_and_name_AMS08;
-    data.data_length = (uint16_t)sizeof(long_packge_version_version_and_name_AMS08);
+    data.datas = long_packge_version_version_and_name;
+    data.data_length = (uint16_t)sizeof(long_packge_version_version_and_name);
     data.package_number = printer_data_long.package_number;
     data.type = printer_data_long.type;
     data.source_address = printer_data_long.target_address;
@@ -1234,6 +1255,15 @@ bambubus_package_type bambubus_run()
 
             case bambubus_package_type::serial_number:
                 get_package_long_packge_serial_number(buf, len);
+                break;
+
+            case bambubus_package_type::authentication_cert:
+            case bambubus_package_type::authentication_challenge:
+                /*
+                 * Handled by auth_proxy.cpp through the raw frame capture
+                 * callback. BMCU must not synthesize its own authentication
+                 * response here.
+                 */
                 break;
 
             case bambubus_package_type::set_filament_info:

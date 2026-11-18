@@ -9,6 +9,13 @@ enum class _bus_data_type : uint8_t
     none = 0x00
 };
 
+#ifndef BMCU_BUS_HEARTBEAT_TIMEOUT_MS
+#define BMCU_BUS_HEARTBEAT_TIMEOUT_MS 1000u
+#endif
+
+typedef uint8_t (*bus_frame_capture_filter_t)(const uint8_t *data, uint16_t length);
+typedef void (*bus_frame_capture_sink_t)(const uint8_t *data, uint16_t length);
+
 void bambubus_heartbeat_seen_fast(void);
 
 class _bus_port_deal // 中断数据处理
@@ -28,6 +35,8 @@ private:
     uint8_t *bus_irq_data_ptr = recv_data_buf[0];
     int drop_bytes = 0;
     void (*port_send_datas)(uint8_t *data, uint16_t len);
+    bus_frame_capture_filter_t frame_capture_filter = nullptr;
+    bus_frame_capture_sink_t frame_capture_sink = nullptr;
 
 public:
     uint8_t * volatile bus_recv_data_ptr = recv_data_buf[0];
@@ -56,6 +65,15 @@ public:
         recv_data_len = 0;
         tx_build_sel  = 0;
         port_send_datas = _port_send_datas;
+        frame_capture_filter = nullptr;
+        frame_capture_sink = nullptr;
+    }
+
+    void set_frame_capture(bus_frame_capture_filter_t filter,
+                           bus_frame_capture_sink_t sink)
+    {
+        frame_capture_filter = filter;
+        frame_capture_sink = sink;
     }
 
     void irq(uint8_t data)
@@ -162,6 +180,18 @@ public:
         if (idx >= length)
         {
             _index = 0;
+
+            /*
+             * Authentication transactions arrive as several independent
+             * frames. Capture selected frames before the single normal RX
+             * slot can reject a following frame.
+             */
+            if ((frame_capture_sink != nullptr) &&
+                ((frame_capture_filter == nullptr) ||
+                 frame_capture_filter(bus_irq_data_ptr, (uint16_t)length)))
+            {
+                frame_capture_sink(bus_irq_data_ptr, (uint16_t)length);
+            }
 
             if (recv_data_len == 0)
             {

@@ -380,7 +380,7 @@ ahubus_package_type ahubus_run()
             {
             case ahubus_package_type::heartbeat:
                 ahubus_slave_get_package_heartbeat(buf);
-                deadline = now + ms_to_ticks32(1000u);
+                deadline = now + ms_to_ticks32(BMCU_BUS_HEARTBEAT_TIMEOUT_MS);
                 break;
 
             case ahubus_package_type::query:
