@@ -1,10 +1,10 @@
-name: 自动编译固件
+#name: 自动编译固件
 
 # 普通 push/PR 只构建认证代理测试固件。
 # 完整发布矩阵通过 Actions 页面手动触发。
-on: [push, pull_request, workflow_dispatch]
+#on: [push, pull_request, workflow_dispatch]
 
-jobs:
+#jobs:
   build:                    # 注意这里需要缩进2空格
     name: 手动编译全部固件
     runs-on: ubuntu-latest
