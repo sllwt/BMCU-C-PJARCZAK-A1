@@ -58,7 +58,7 @@
  * contention when the AMS already accepted the printer's frame.
  */
 #ifndef BMCU_AUTH_PROXY_DIRECT_RESPONSE_GRACE_MS
-#define BMCU_AUTH_PROXY_DIRECT_RESPONSE_GRACE_MS 5
+#define BMCU_AUTH_PROXY_DIRECT_RESPONSE_GRACE_MS 15
 #endif
 
 #ifndef BMCU_AUTH_PROXY_RETRY_COUNT
