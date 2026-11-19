@@ -195,6 +195,8 @@ static on_use_cycle_state g_on_use_cycle_state[4] =
     on_use_cycle_state::wait_pressure
 };
 
+static float g_on_use_cmd_applied[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
 static inline __attribute__((always_inline)) void MC_STU_RGB_set_latch(uint8_t ch, uint8_t r, uint8_t g, uint8_t b, uint64_t now_ms, uint8_t blink)
 {
     if (!g_on_use_low_latch[ch]) { MC_STU_RGB_set(ch, r, g, b); return; }
@@ -294,8 +296,11 @@ static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
     static constexpr float MC_ON_USE_STOP_PCT       = 60.0f;
     static constexpr float MC_ON_USE_OVER_PCT       = 65.0f;
     static constexpr float MC_ON_USE_RECOVER_PCT    = 60.0f;
+    static constexpr uint64_t MC_ON_USE_TRANSITION_MS = 5000ull;
     static constexpr float MC_ON_USE_PWM_PUSH_START = 900.0f;
     static constexpr float MC_ON_USE_PWM_PUSH_END   = 420.0f;
+    static constexpr float MC_ON_USE_PWM_RATE_UP    = 3000.0f;
+    static constexpr float MC_ON_USE_PWM_RATE_DOWN  = 6000.0f;
     static constexpr float MC_ON_USE_PWM_OVER_PULL  = 950.0f;
 #else        // A1
     // Stage1
@@ -313,8 +318,11 @@ static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
     static constexpr float MC_ON_USE_STOP_PCT       = 60.0f;
     static constexpr float MC_ON_USE_OVER_PCT       = 65.0f;
     static constexpr float MC_ON_USE_RECOVER_PCT    = 60.0f;
+    static constexpr uint64_t MC_ON_USE_TRANSITION_MS = 5000ull;
     static constexpr float MC_ON_USE_PWM_PUSH_START = 900.0f;
     static constexpr float MC_ON_USE_PWM_PUSH_END   = 420.0f;
+    static constexpr float MC_ON_USE_PWM_RATE_UP    = 3000.0f;
+    static constexpr float MC_ON_USE_PWM_RATE_DOWN  = 6000.0f;
     static constexpr float MC_ON_USE_PWM_OVER_PULL  = 950.0f;
 #endif
 // ====================================================
@@ -845,6 +853,7 @@ public:
             prev == filament_motion_enum::filament_motion_pressure_ctrl_on_use)
         {
             g_on_use_cycle_state[CHx] = on_use_cycle_state::wait_pressure;
+            g_on_use_cmd_applied[CHx] = 0.0f;
         }
 
         if (_motion == filament_motion_enum::filament_motion_send ||
@@ -1505,6 +1514,7 @@ public:
                 PID_pressure.clear();
                 pwm_zeroed = 1;
                 x_prev[CHx] = 0.0f;
+                g_on_use_cmd_applied[CHx] = 0.0f;
                 Motion_control_set_PWM(CHx, 0);
                 return;
             }
@@ -1513,10 +1523,40 @@ public:
                 const float pct = MC_PULL_pct_f[CHx];
                 auto &state = g_on_use_cycle_state[CHx];
 
+                float over_pct_eff = MC_ON_USE_OVER_PCT;
+
+                if (on_use_hi_gate_pct >= 0.0f)
+                {
+                    const bool gate_active =
+                        (on_use_hi_gate_t0_ms != 0ull) &&
+                        ((now_ms - on_use_hi_gate_t0_ms) < MC_ON_USE_TRANSITION_MS);
+
+                    if (!gate_active)
+                    {
+                        on_use_hi_gate_pct   = -1.0f;
+                        on_use_hi_gate_t0_ms = 0ull;
+                    }
+                    else
+                    {
+                        const float d = on_use_hi_gate_pct - pct;
+                        if (d > 2.0f)
+                        {
+                            float ng = pct + 1.0f;
+                            if (ng < MC_ON_USE_OVER_PCT) ng = MC_ON_USE_OVER_PCT;
+                            if (ng > 100.0f)             ng = 100.0f;
+                            on_use_hi_gate_pct = ng;
+                        }
+
+                        const float gated_over = on_use_hi_gate_pct + 0.25f;
+                        if (gated_over > over_pct_eff)
+                            over_pct_eff = gated_over;
+                    }
+                }
+
                 switch (state)
                 {
                 case on_use_cycle_state::wait_pressure:
-                    if (pct >= MC_ON_USE_OVER_PCT)
+                    if (pct >= over_pct_eff)
                     {
                         state = on_use_cycle_state::overpressure_retract;
                     }
@@ -1527,7 +1567,7 @@ public:
                     break;
 
                 case on_use_cycle_state::push_to_60:
-                    if (pct >= MC_ON_USE_OVER_PCT)
+                    if (pct >= over_pct_eff)
                     {
                         state = on_use_cycle_state::overpressure_retract;
                     }
@@ -1730,6 +1770,8 @@ public:
         // stałe tryby
         const bool pull_mode = (motion == filament_motion_enum::filament_motion_pull);
         const bool pb_mode = (motion == filament_motion_enum::filament_motion_before_pull_back);
+        const bool on_use_mode =
+            (motion == filament_motion_enum::filament_motion_pressure_ctrl_on_use);
 
         const bool send_stop_hold_mode =
             (motion == filament_motion_enum::filament_motion_send) && send_stop_latch;
@@ -1748,7 +1790,7 @@ public:
 
         float pwm0 =
             pb_mode ? 0.0f :
-            (hold_mode ? 420.0f : pwm_zero);
+            (hold_mode ? (on_use_mode ? MC_ON_USE_PWM_PUSH_END : 420.0f) : pwm_zero);
 
         if (pull_mode)
         {
@@ -1772,6 +1814,75 @@ public:
         else
         {
             x = 0.0f;
+        }
+
+        if (on_use_mode &&
+            g_on_use_cycle_state[CHx] != on_use_cycle_state::overpressure_retract)
+        {
+            const float target  = x;
+            float       applied = g_on_use_cmd_applied[CHx];
+
+            const float up_step   = MC_ON_USE_PWM_RATE_UP   * time_E;
+            const float down_step = MC_ON_USE_PWM_RATE_DOWN * time_E;
+
+            if (target == 0.0f)
+            {
+                if (applied > 0.0f)
+                {
+                    applied -= down_step;
+                    if (applied < 0.0f) applied = 0.0f;
+                }
+                else if (applied < 0.0f)
+                {
+                    applied += down_step;
+                    if (applied > 0.0f) applied = 0.0f;
+                }
+            }
+            else if (applied == 0.0f)
+            {
+                applied = (target > 0.0f) ? up_step : -up_step;
+                if (absf(applied) > absf(target))
+                    applied = target;
+            }
+            else if ((target > 0.0f) != (applied > 0.0f))
+            {
+                if (applied > 0.0f)
+                {
+                    applied -= down_step;
+                    if (applied < 0.0f) applied = 0.0f;
+                }
+                else
+                {
+                    applied += down_step;
+                    if (applied > 0.0f) applied = 0.0f;
+                }
+            }
+            else
+            {
+                const float target_mag  = absf(target);
+                float       applied_mag = absf(applied);
+
+                if (target_mag > applied_mag)
+                {
+                    applied_mag += up_step;
+                    if (applied_mag > target_mag) applied_mag = target_mag;
+                }
+                else
+                {
+                    applied_mag -= down_step;
+                    if (applied_mag < target_mag) applied_mag = target_mag;
+                }
+
+                applied = (target > 0.0f) ? applied_mag : -applied_mag;
+            }
+
+            x = applied;
+            g_on_use_cmd_applied[CHx] = x;
+        }
+        else if (on_use_mode)
+        {
+            // Overpressure retraction is a safety action and must not be delayed by ramping.
+            g_on_use_cmd_applied[CHx] = x;
         }
 
         // clamp
@@ -1842,6 +1953,7 @@ public:
                     PID_pressure.clear();
                     pwm_zeroed = 1;
                     x_prev[CHx] = 0.0f;
+                    g_on_use_cmd_applied[CHx] = 0.0f;
                     Motion_control_set_PWM(CHx, 0);
                     return;
                 }
