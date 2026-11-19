@@ -180,6 +180,21 @@ static uint8_t  g_on_use_low_latch[4]   = {0, 0, 0, 0};   // 1=stop motor latch
 static uint8_t  g_on_use_jam_latch[4]   = {0, 0, 0, 0};   // 1=real jam -> 0xF06F
 static uint32_t g_on_use_hi_pwm_us[4]   = {0u, 0u, 0u, 0u};
 
+enum class on_use_cycle_state : uint8_t
+{
+    wait_pressure = 0,
+    push_to_60,
+    overpressure_retract
+};
+
+static on_use_cycle_state g_on_use_cycle_state[4] =
+{
+    on_use_cycle_state::wait_pressure,
+    on_use_cycle_state::wait_pressure,
+    on_use_cycle_state::wait_pressure,
+    on_use_cycle_state::wait_pressure
+};
+
 static inline __attribute__((always_inline)) void MC_STU_RGB_set_latch(uint8_t ch, uint8_t r, uint8_t g, uint8_t b, uint64_t now_ms, uint8_t blink)
 {
     if (!g_on_use_low_latch[ch]) { MC_STU_RGB_set(ch, r, g, b); return; }
@@ -275,9 +290,13 @@ static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
     static constexpr float MC_LOAD_S2_PWM_HI             = 550.0f;
     static constexpr float MC_LOAD_S2_PWM_LO             = 1000.0f;
     // ===== ON_USE CONTROL =====
-    static constexpr float MC_ON_USE_TARGET_PCT    = 54.0f;
-    static constexpr float MC_ON_USE_BAND_LO_DELTA = 0.2f;  // band_lo = target - delta
-    static constexpr float MC_ON_USE_BAND_HI_PCT   = 65.0f;
+    static constexpr float MC_ON_USE_START_PCT      = 50.0f;
+    static constexpr float MC_ON_USE_STOP_PCT       = 60.0f;
+    static constexpr float MC_ON_USE_OVER_PCT       = 65.0f;
+    static constexpr float MC_ON_USE_RECOVER_PCT    = 60.0f;
+    static constexpr float MC_ON_USE_PWM_PUSH_START = 900.0f;
+    static constexpr float MC_ON_USE_PWM_PUSH_END   = 420.0f;
+    static constexpr float MC_ON_USE_PWM_OVER_PULL  = 950.0f;
 #else        // A1
     // Stage1
     static constexpr int   MC_LOAD_S1_FAST_PCT       = 82;
@@ -290,9 +309,13 @@ static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
     static constexpr float MC_LOAD_S2_PWM_HI             = 530.0f;
     static constexpr float MC_LOAD_S2_PWM_LO             = 1000.0f;
     // ===== ON_USE CONTROL =====
-    static constexpr float MC_ON_USE_TARGET_PCT    = 54.0f;
-    static constexpr float MC_ON_USE_BAND_LO_DELTA = 1.0f;  // band_lo = target - delta
-    static constexpr float MC_ON_USE_BAND_HI_PCT   = 65.0f;
+    static constexpr float MC_ON_USE_START_PCT      = 50.0f;
+    static constexpr float MC_ON_USE_STOP_PCT       = 60.0f;
+    static constexpr float MC_ON_USE_OVER_PCT       = 65.0f;
+    static constexpr float MC_ON_USE_RECOVER_PCT    = 60.0f;
+    static constexpr float MC_ON_USE_PWM_PUSH_START = 900.0f;
+    static constexpr float MC_ON_USE_PWM_PUSH_END   = 420.0f;
+    static constexpr float MC_ON_USE_PWM_OVER_PULL  = 950.0f;
 #endif
 // ====================================================
 
@@ -816,6 +839,12 @@ public:
             _motion != filament_motion_enum::filament_motion_pressure_ctrl_on_use)
         {
             g_last_on_use_exit_ms[CHx] = time_now;
+        }
+
+        if (_motion == filament_motion_enum::filament_motion_pressure_ctrl_on_use ||
+            prev == filament_motion_enum::filament_motion_pressure_ctrl_on_use)
+        {
+            g_on_use_cycle_state[CHx] = on_use_cycle_state::wait_pressure;
         }
 
         if (_motion == filament_motion_enum::filament_motion_send ||
@@ -1482,99 +1511,93 @@ public:
             else if (motion == filament_motion_enum::filament_motion_pressure_ctrl_on_use)
             {
                 const float pct = MC_PULL_pct_f[CHx];
+                auto &state = g_on_use_cycle_state[CHx];
 
-                constexpr float target_pct = MC_ON_USE_TARGET_PCT;
-                constexpr float band_hi    = MC_ON_USE_BAND_HI_PCT;
-
-                float band_hi_eff = band_hi;
-
-                if (on_use_hi_gate_pct >= 0.0f)
+                switch (state)
                 {
-                    const bool gate_active =
-                        (on_use_hi_gate_t0_ms != 0ull) &&
-                        ((now_ms - on_use_hi_gate_t0_ms) < 5000ull);
-
-                    if (!gate_active)
+                case on_use_cycle_state::wait_pressure:
+                    if (pct >= MC_ON_USE_OVER_PCT)
                     {
-                        on_use_hi_gate_pct   = -1.0f;
-                        on_use_hi_gate_t0_ms = 0ull;
+                        state = on_use_cycle_state::overpressure_retract;
                     }
-                    else
+                    else if (pct <= MC_ON_USE_START_PCT)
                     {
-                        if (pct > on_use_hi_gate_pct) on_use_hi_gate_pct = pct;
-
-                        const float d = on_use_hi_gate_pct - pct;
-                        if (d > 2.0f)
-                        {
-                            float ng = pct + 1.0f;
-                            if (ng < band_hi) ng = band_hi;
-                            if (ng > 100.0f)  ng = 100.0f;
-                            on_use_hi_gate_pct = ng;
-                        }
-
-                        if (on_use_hi_gate_pct > band_hi_eff) band_hi_eff = on_use_hi_gate_pct;
+                        state = on_use_cycle_state::push_to_60;
                     }
+                    break;
+
+                case on_use_cycle_state::push_to_60:
+                    if (pct >= MC_ON_USE_OVER_PCT)
+                    {
+                        state = on_use_cycle_state::overpressure_retract;
+                    }
+                    else if (pct >= MC_ON_USE_STOP_PCT)
+                    {
+                        state = on_use_cycle_state::wait_pressure;
+                    }
+                    break;
+
+                case on_use_cycle_state::overpressure_retract:
+                    if (pct <= MC_ON_USE_RECOVER_PCT)
+                    {
+                        state = on_use_cycle_state::wait_pressure;
+                    }
+                    break;
+
+                default:
+                    state = on_use_cycle_state::wait_pressure;
+                    break;
                 }
 
-                constexpr float pwm_lo          = 380.0f;
-                constexpr float pct_fast_onuse  = 50.0f;
-                constexpr float pwm_fast_onuse  = 900.0f;
-                constexpr float pwm_cap         = 900.0f;
-
-                constexpr float slope =
-                    (pwm_fast_onuse - pwm_lo) / ((target_pct - MC_ON_USE_BAND_LO_DELTA) - pct_fast_onuse);
-
-                retract_hys_active = 0;
-
-                if (pct >= (target_pct - MC_ON_USE_BAND_LO_DELTA) && pct <= band_hi_eff)
+                switch (state)
                 {
-                    x = 0.0f;
+                case on_use_cycle_state::push_to_60:
+                {
+                    float k =
+                        (pct - MC_ON_USE_START_PCT) /
+                        (MC_ON_USE_STOP_PCT - MC_ON_USE_START_PCT);
+
+                    k = clampf(k, 0.0f, 1.0f);
+
+                    const float pwm_push =
+                        MC_ON_USE_PWM_PUSH_START +
+                        (MC_ON_USE_PWM_PUSH_END - MC_ON_USE_PWM_PUSH_START) * k;
+
+                    // -dir is the filament push direction.
+                    x = -dir * pwm_push;
+
                     PID_pressure.clear();
+                    retract_hys_active = 0;
+
+                    on_use_need_move = true;
+                    on_use_abs_err   = MC_ON_USE_STOP_PCT - pct;
+                    on_use_linear    = true;
+                    break;
+                }
+
+                case on_use_cycle_state::overpressure_retract:
+                    // +dir is the filament retract direction.
+                    x = dir * MC_ON_USE_PWM_OVER_PULL;
+
+                    PID_pressure.clear();
+                    retract_hys_active = 0;
+
+                    on_use_need_move = true;
+                    on_use_abs_err   = pct - MC_ON_USE_RECOVER_PCT;
+                    on_use_linear    = false;
+                    break;
+
+                case on_use_cycle_state::wait_pressure:
+                default:
+                    x = 0.0f;
+
+                    PID_pressure.clear();
+                    retract_hys_active = 0;
+
                     on_use_need_move = false;
                     on_use_abs_err   = 0.0f;
-                }
-                else if (pct < (target_pct - MC_ON_USE_BAND_LO_DELTA))
-                {
-                    const float err = pct - target_pct;
-                    on_use_need_move = true;
-                    on_use_abs_err   = -err;
-
-                    float pwm;
-                    if (pct >= pct_fast_onuse)
-                        pwm = pwm_lo + ((target_pct - MC_ON_USE_BAND_LO_DELTA) - pct) * slope;
-                    else
-                        pwm = pwm_fast_onuse + (pct_fast_onuse - pct) * slope;
-
-                    if (pwm > pwm_cap) pwm = pwm_cap;
-
-                    x = -dir * pwm;
-                    PID_pressure.clear();
-                    on_use_linear = true;
-                }
-                else
-                {
-                    on_use_need_move = true;
-
-                    const float err = pct - target_pct;
-                    on_use_abs_err = (err < 0.0f) ? -err : err;
-
-                    x = dir * PID_pressure.caculate(err, time_E);
-
-                    float lim_f = 500.0f + 80.0f * on_use_abs_err;
-                    if (lim_f > 900.0f) lim_f = 900.0f;
-
-                    if (x >  lim_f) x =  lim_f;
-                    if (x < -lim_f) x = -lim_f;
-
-                    constexpr float retrig = 55.0f;
-                    if (err > 0.0f && pct >= retrig)
-                    {
-                        float mul = 1.0f + 0.5f * (pct - retrig);
-                        if (mul > 3.0f) mul = 3.0f;
-                        x *= mul;
-                        if (x >  950.0f) x =  950.0f;
-                        if (x < -950.0f) x = -950.0f;
-                    }
+                    on_use_linear    = false;
+                    break;
                 }
             }
             else
