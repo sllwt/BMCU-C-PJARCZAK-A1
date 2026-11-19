@@ -316,7 +316,7 @@ static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
     // ===== ON_USE CONTROL =====
     static constexpr float MC_ON_USE_START_PCT      = 50.0f;
     static constexpr float MC_ON_USE_STOP_PCT       = 60.0f;
-    static constexpr float MC_ON_USE_OVER_PCT       = 65.0f;
+    static constexpr float MC_ON_USE_OVER_PCT       = 67.0f;
     static constexpr float MC_ON_USE_RECOVER_PCT    = 60.0f;
     static constexpr uint64_t MC_ON_USE_TRANSITION_MS = 5000ull;
     static constexpr float MC_ON_USE_PWM_PUSH_START = 900.0f;
@@ -1581,6 +1581,7 @@ public:
                     if (pct <= MC_ON_USE_RECOVER_PCT)
                     {
                         state = on_use_cycle_state::wait_pressure;
+                        g_on_use_cmd_applied[CHx] = 0.0f;
                     }
                     break;
 
