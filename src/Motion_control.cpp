@@ -1840,7 +1840,10 @@ public:
             }
             else if (applied == 0.0f)
             {
-                applied = (target > 0.0f) ? up_step : -up_step;
+                // Start at the configured minimum push PWM, then ramp toward target.
+                applied = (target > 0.0f)
+                    ? MC_ON_USE_PWM_PUSH_END
+                    : -MC_ON_USE_PWM_PUSH_END;
                 if (absf(applied) > absf(target))
                     applied = target;
             }
